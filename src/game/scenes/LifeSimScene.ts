@@ -42,6 +42,10 @@ const DOG_DESIRED_HEIGHT_PX = 90;
 const MAN_REACTION_ACK_MS = 2_000;
 const MAN_REACTION_REJECT_MS = 2_000;
 const MAN_REACTION_BELL_MS = 2_000;
+const MAN_REACTION_KNOCK_MS = 2_400;
+const ATTENTION_IDLE_THRESHOLD_MS = 2 * 60 * 1000;
+const ATTENTION_KNOCK_INTERVAL_MIN_MS = 90 * 1000;
+const ATTENTION_KNOCK_INTERVAL_MAX_MS = 180 * 1000;
 const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
@@ -295,6 +299,9 @@ export default class LifeSimScene extends Phaser.Scene {
   private startupExplorationDueAtMs = STARTUP_EXPLORATION_DELAY_MS;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
   private manReactionUntilMs = 0;
+  private lastPlayerInteractionAtMs = 0;
+  private nextAttentionKnockAtMs = 0;
+  private attentionReasonCursor = 0;
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
   private missingLayoutTextureKeys = new Set<string>();
@@ -357,6 +364,22 @@ export default class LifeSimScene extends Phaser.Scene {
     },
     { animationKey: 'man-anim-sleep', texture: 'man-sleep', frameCount: 16, framesPerRow: 4, frameRate: 6 },
     {
+      animationKey: 'man-anim-dance',
+      texture: 'man-dance',
+      fallbackTexture: 'man-use-object',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 14,
+    },
+    {
+      animationKey: 'man-anim-knock',
+      texture: 'man-knock',
+      fallbackTexture: 'man-use-object',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 14,
+    },
+    {
       animationKey: 'man-anim-running-machine',
       texture: 'man-running-machine',
       fallbackTexture: 'man-use-object',
@@ -365,6 +388,22 @@ export default class LifeSimScene extends Phaser.Scene {
       frameRate: 14,
     },
     { animationKey: 'man-anim-use-object', texture: 'man-use-object', frameCount: 36, framesPerRow: 6, frameRate: 14 },
+    {
+      animationKey: 'dog-anim-idle',
+      texture: 'dog-idle',
+      fallbackTexture: 'dog-walk-down',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 10,
+    },
+    {
+      animationKey: 'dog-anim-sleep',
+      texture: 'dog-sleep',
+      fallbackTexture: 'dog-walk-down',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 8,
+    },
     { animationKey: 'dog-anim-walk-down', texture: 'dog-walk-down', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-up', texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-left', texture: 'dog-walk-left', frameCount: 16, framesPerRow: 4, frameRate: 12 },
@@ -383,7 +422,11 @@ export default class LifeSimScene extends Phaser.Scene {
         'man-sit-away',
         'man-nod',
         'man-shake',
+        'man-dance',
+        'man-knock',
         'man-running-machine',
+        'dog-idle',
+        'dog-sleep',
       ]);
       if (optionalAnimationKeys.has(file.key)) {
         this.missingOptionalTextures.add(file.key);
@@ -409,6 +452,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-sit-away', '/sprites/sitting-facing-away.png');
     this.load.image('man-nod', '/sprites/noddinghead.png');
     this.load.image('man-shake', '/sprites/shakinghead.png');
+    this.load.image('man-dance', '/sprites/dancing-36frames.png');
+    this.load.image('man-knock', '/sprites/knocking-on-the-screen-36frames.png');
     this.load.image('man-running-machine', '/sprites/running-runningmachine-36frames.png');
     // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
@@ -418,6 +463,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('dog-walk-up', '/sprites/dog-walking-up.png');
     this.load.image('dog-walk-left', '/sprites/dog-walking-left.png');
     this.load.image('dog-walk-right', '/sprites/dog-walking-right.png');
+    this.load.image('dog-idle', '/sprites/dog-idle-36frames.png');
+    this.load.image('dog-sleep', '/sprites/dog-sleeping-36frames.png');
 
     const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
     const objectTypes = Array.from(new Set(layoutObjects.map((object) => object.type)));
@@ -487,6 +534,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.playManIdle();
     this.playDogIdle();
     this.startupExplorationDueAtMs = this.time.now + STARTUP_EXPLORATION_DELAY_MS;
+    this.lastPlayerInteractionAtMs = this.time.now;
+    this.nextAttentionKnockAtMs = this.time.now + Phaser.Math.Between(ATTENTION_KNOCK_INTERVAL_MIN_MS, ATTENTION_KNOCK_INTERVAL_MAX_MS);
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
@@ -505,6 +554,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickNarrativeEvents(time);
     this.tickMan(deltaMs, time);
     this.tickDog(deltaMs, time);
+    this.tickAttentionSeeking(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -521,6 +571,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
   public ringBell(): void {
     this.ringBellCount += 1;
+    this.markPlayerInteraction();
     if (!this.isTaskAvailable('door_delivery')) {
       this.emitLog('system', 'Door flow is not configured in this layout.');
       this.emitAudioCue('negative');
@@ -555,6 +606,7 @@ export default class LifeSimScene extends Phaser.Scene {
   public submitPlayerCommand(rawInput: string): void {
     const command = parsePlayerCommand(rawInput);
     this.emitLog('player', rawInput);
+    this.markPlayerInteraction();
 
     if (!command.isUnderstood) {
       this.emitLog('system', command.feedback);
@@ -741,6 +793,11 @@ export default class LifeSimScene extends Phaser.Scene {
     this.events.emit('ui-profile', this.identity);
   }
 
+  private markPlayerInteraction(now = this.time.now): void {
+    this.lastPlayerInteractionAtMs = now;
+    this.nextAttentionKnockAtMs = now + Phaser.Math.Between(ATTENTION_KNOCK_INTERVAL_MIN_MS, ATTENTION_KNOCK_INTERVAL_MAX_MS);
+  }
+
   private reportOptionalAnimationFallbacks(): void {
     const fallbacks: Array<{ key: string; label: string; fallback: string }> = [
       { key: 'man-idle-stand', label: 'idle stand', fallback: 'man-walk-down' },
@@ -748,7 +805,11 @@ export default class LifeSimScene extends Phaser.Scene {
       { key: 'man-sit-away', label: 'sit away', fallback: 'man-use-computer' },
       { key: 'man-nod', label: 'nod reaction', fallback: 'man-idle-stand' },
       { key: 'man-shake', label: 'shake reaction', fallback: 'man-idle-stand' },
+      { key: 'man-dance', label: 'dance', fallback: 'man-use-object' },
+      { key: 'man-knock', label: 'knock for attention', fallback: 'man-use-object' },
       { key: 'man-running-machine', label: 'running machine', fallback: 'man-use-object' },
+      { key: 'dog-idle', label: 'dog idle', fallback: 'dog-walk-down' },
+      { key: 'dog-sleep', label: 'dog sleep', fallback: 'dog-walk-down' },
     ];
 
     fallbacks.forEach((item) => {
@@ -1498,8 +1559,8 @@ export default class LifeSimScene extends Phaser.Scene {
         npc.sprite.setPosition(actionAnchorForTask.x, this.toRenderY(actionAnchorForTask.y, npc.id));
       }
       if (task === 'dance') {
-        this.applyNpcScaleForTexture(npc, 'man-walk-right');
-        npc.sprite.play('man-anim-walk-right', true);
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-dance', 'man-use-object'));
+        npc.sprite.play('man-anim-dance', true);
       } else if (task === 'sit_chair' || task === 'sit_sofa' || task === 'sit_settee') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
         npc.sprite.play('man-anim-sit-chair', true);
@@ -1865,6 +1926,17 @@ export default class LifeSimScene extends Phaser.Scene {
     this.pauseCurrentAnimation(this.man.sprite);
   }
 
+  private triggerManAttentionKnock(durationMs: number): boolean {
+    if (this.man.hiddenUntilMs > 0 || !this.man.sprite.visible) {
+      return false;
+    }
+
+    this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-knock', 'man-use-object'));
+    this.man.sprite.play('man-anim-knock', true);
+    this.manReactionUntilMs = Math.max(this.manReactionUntilMs, this.time.now + Math.max(120, durationMs));
+    return true;
+  }
+
   private triggerManReaction(kind: 'nod' | 'shake', durationMs: number): boolean {
     if (this.man.hiddenUntilMs > 0 || !this.man.sprite.visible) {
       return false;
@@ -1916,6 +1988,12 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (task === 'dance') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-dance', 'man-use-object'));
+      this.man.sprite.play('man-anim-dance', true);
+      return;
+    }
+
     if (task === 'use_running_machine') {
       this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-running-machine', 'man-use-object'));
       this.man.sprite.play('man-anim-running-machine', true);
@@ -1944,9 +2022,21 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private playDogIdle(): void {
-    this.applyNpcScaleForTexture(this.dog, 'dog-walk-down');
-    this.dog.sprite.play('dog-anim-walk-down', true);
-    this.pauseCurrentAnimation(this.dog.sprite);
+    const texture = this.resolveTexture('dog-idle', 'dog-walk-down');
+    this.applyNpcScaleForTexture(this.dog, texture);
+    this.dog.sprite.play('dog-anim-idle', true);
+    if (texture === 'dog-walk-down') {
+      this.pauseCurrentAnimation(this.dog.sprite);
+    }
+  }
+
+  private playDogSleep(): void {
+    const texture = this.resolveTexture('dog-sleep', 'dog-walk-down');
+    this.applyNpcScaleForTexture(this.dog, texture);
+    this.dog.sprite.play('dog-anim-sleep', true);
+    if (texture === 'dog-walk-down') {
+      this.pauseCurrentAnimation(this.dog.sprite);
+    }
   }
 
   private playNpcIdle(npc: NpcRuntime): void {
@@ -2106,6 +2196,48 @@ export default class LifeSimScene extends Phaser.Scene {
     return x - Math.floor(x);
   }
 
+  private tickAttentionSeeking(time: number): void {
+    if (time < this.nextAttentionKnockAtMs) {
+      return;
+    }
+
+    const inactivityMs = time - this.lastPlayerInteractionAtMs;
+    if (inactivityMs < ATTENTION_IDLE_THRESHOLD_MS) {
+      this.nextAttentionKnockAtMs = this.lastPlayerInteractionAtMs + ATTENTION_IDLE_THRESHOLD_MS;
+      return;
+    }
+
+    if (
+      this.man.hiddenUntilMs > 0 ||
+      this.doorPhase !== 'none' ||
+      this.manReactionUntilMs > 0 ||
+      this.man.currentTask.type !== 'idle' ||
+      this.man.performUntilMs > 0 ||
+      this.man.path.length > 0 ||
+      this.manTaskQueue.length > 0 ||
+      this.playerRequests.length > 0
+    ) {
+      this.nextAttentionKnockAtMs = time + 15_000;
+      return;
+    }
+
+    const prompts = [
+      'Are you still there? He knocks on the screen to get your attention.',
+      `${this.identity.name} taps the screen and hints that he feels hungry.`,
+      `${this.identity.name} knocks and says the dog seems hungry too.`,
+    ];
+    const prompt = prompts[this.attentionReasonCursor % prompts.length];
+    this.attentionReasonCursor += 1;
+
+    const triggered = this.triggerManAttentionKnock(MAN_REACTION_KNOCK_MS);
+    if (triggered) {
+      this.emitLog('man', prompt);
+      this.emitAudioCue('positive');
+    }
+
+    this.nextAttentionKnockAtMs = time + Phaser.Math.Between(ATTENTION_KNOCK_INTERVAL_MIN_MS, ATTENTION_KNOCK_INTERVAL_MAX_MS);
+  }
+
   private tickDog(_deltaMs: number, time: number): void {
     if (this.man.currentTask.type === 'pet_dog') {
       const target = this.getDogCompanionCellNearMan();
@@ -2125,9 +2257,7 @@ export default class LifeSimScene extends Phaser.Scene {
     if (dayRatio > 0.9) {
       this.dog.currentTask = { type: 'sleep' };
       this.dog.path = [];
-      this.applyNpcScaleForTexture(this.dog, 'dog-walk-down');
-      this.dog.sprite.play('dog-anim-walk-down', true);
-      this.pauseCurrentAnimation(this.dog.sprite);
+      this.playDogSleep();
       return;
     }
 
