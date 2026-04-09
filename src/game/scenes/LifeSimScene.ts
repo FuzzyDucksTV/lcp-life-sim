@@ -24,10 +24,10 @@ const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
 const LAYOUT_OBJECT_POSITION_OVERRIDES: Record<string, { x?: number; y?: number }> = {
   // Fine-tuned to match the editor export preview for these assets.
-  bath_4x3_5_idle: { y: -8 },
-  toilet_4x4_idle: { y: -10 },
+  bath_4x3_5_idle: { x: -22, y: -8 },
+  toilet_4x4_idle: { x: -18, y: -10 },
   computerdesk_4x4_idle: { x: -52 },
-  calendar_1x1_idle: { x: -22 },
+  calendar_1x1_idle: { x: -30 },
 };
 
 interface NpcRuntime {
