@@ -56,6 +56,18 @@ const DOG_SLEEP_DURATION_MAX_MS = 240_000;
 const DOG_EAT_DURATION_MS = 20_000;
 const DOG_SLEEP_CHANCE = 0.12;
 const DOG_EAT_CHANCE = 0.08;
+const WASHING_COLLECT_DELAY_MIN_MS = 300_000;
+const WASHING_COLLECT_DELAY_MAX_MS = 600_000;
+const FORGET_CHANCE = 0.35;
+
+const INTERACTIVE_OBJECT_TYPES: ReadonlyMap<string, { task: TaskType; hideOnStart: boolean }> = new Map([
+  ['cooker_3x4_cooking', { task: 'use_cooker', hideOnStart: false }],
+  ['cupboard_2x1_open', { task: 'open_kitchen_cupboard', hideOnStart: false }],
+  ['dishwasher_3x4_open', { task: 'use_dishwasher', hideOnStart: false }],
+  ['fridge_6x6_open', { task: 'use_fridge', hideOnStart: false }],
+  ['wardrobe_5_5x6_idle', { task: 'use_wardrobe', hideOnStart: false }],
+  ['washingmachine_3x4_full', { task: 'use_washing_machine', hideOnStart: false }],
+]);
 const ACTION_ANCHOR_KEYS = [
   'sit_sofa',
   'sit_settee',
@@ -103,6 +115,7 @@ const TASK_ACTION_ANCHOR_KEYS: Partial<Record<TaskType, readonly ActionAnchorKey
   use_kitchen_worktop: ['use_kitchen_worktop'],
   use_cooker: ['use_cooker'],
   use_wardrobe: ['use_wardrobe'],
+  collect_washing: ['use_washing_machine'],
 };
 
 interface NpcRuntime {
@@ -270,6 +283,8 @@ function textForTask(task: TaskType): string {
       return 'dance';
     case 'eating_food':
       return 'eat some food';
+    case 'collect_washing':
+      return 'collect the washing';
     case 'door_delivery':
       return 'check the door';
     default:
@@ -315,6 +330,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
   private missingLayoutTextureKeys = new Set<string>();
+  private interactiveObjectSprites = new Map<string, Phaser.GameObjects.Image>();
+  private washingCollectDueAtMs = 0;
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -615,6 +632,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickMan(deltaMs, time);
     this.tickDog(deltaMs, time);
     this.tickAttentionSeeking(time);
+    this.tickWashingCollect(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -1002,6 +1020,11 @@ export default class LifeSimScene extends Phaser.Scene {
 
       const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 0;
       sprite.setDepth(renderY + zIndex * LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER);
+
+      if (INTERACTIVE_OBJECT_TYPES.has(object.type)) {
+        this.interactiveObjectSprites.set(object.type, sprite);
+        sprite.setVisible(false);
+      }
     });
   }
 
@@ -1666,11 +1689,13 @@ export default class LifeSimScene extends Phaser.Scene {
         task === 'use_bookcase' ||
         task === 'use_kitchen_worktop' ||
         task === 'use_cooker' ||
-        task === 'use_wardrobe'
+        task === 'use_wardrobe' ||
+        task === 'collect_washing'
       ) {
         this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
       }
+      this.showInteractiveObjectsForTask(task);
       return;
     }
 
@@ -1736,6 +1761,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return between(20_000, 45_000);
       case 'eating_food':
         return between(10_000, 20_000);
+      case 'collect_washing':
+        return between(8_000, 12_000);
       default:
         return between(20_000, 35_000);
     }
@@ -1787,6 +1814,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return this.getActionAnchorTargetCell(task) || this.taskTargets.letterDesk;
       case 'eating_food':
         return this.getActionAnchorTargetCell('use_cooker');
+      case 'collect_washing':
+        return this.getActionAnchorTargetCell('use_washing_machine');
       default:
         return null;
     }
@@ -1841,6 +1870,7 @@ export default class LifeSimScene extends Phaser.Scene {
       task === 'play_another_song' ||
       task === 'type_letter' ||
       task === 'eating_food' ||
+      task === 'collect_washing' ||
       task === 'door_delivery'
     );
   }
@@ -1897,6 +1927,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (task.type === 'use_cooker') {
+      this.hideInteractiveObjectsForTask('use_cooker');
       this.emitLog('man', `${this.identity.name} finished cooking and sits down to eat.`);
       this.enqueueTask(
         { type: 'eating_food', source: 'system', priority: 50, resumable: false },
@@ -1910,6 +1941,32 @@ export default class LifeSimScene extends Phaser.Scene {
         { type: 'use_dishwasher', source: 'system', priority: 50, resumable: false, remainingMs: 10_000 },
         true
       );
+    }
+
+    if (task.type === 'use_fridge') {
+      this.hideInteractiveObjectsForTask('use_fridge');
+    }
+
+    if (task.type === 'open_kitchen_cupboard') {
+      this.hideInteractiveObjectsForTask('open_kitchen_cupboard');
+    }
+
+    if (task.type === 'use_dishwasher') {
+      this.hideInteractiveObjectsForTask('use_dishwasher');
+    }
+
+    if (task.type === 'use_wardrobe') {
+      this.hideInteractiveObjectsForTask('use_wardrobe');
+    }
+
+    if (task.type === 'use_washing_machine') {
+      this.washingCollectDueAtMs = completedAtMs + Phaser.Math.Between(WASHING_COLLECT_DELAY_MIN_MS, WASHING_COLLECT_DELAY_MAX_MS);
+      this.emitLog('system', 'The washing machine is running. He will collect it later.');
+    }
+
+    if (task.type === 'collect_washing') {
+      this.setInteractiveObjectVisible('washingmachine_3x4_full', false);
+      this.emitLog('man', `${this.identity.name} collected the washing.`);
     }
   }
 
@@ -2129,7 +2186,8 @@ export default class LifeSimScene extends Phaser.Scene {
       task === 'use_bookcase' ||
       task === 'use_kitchen_worktop' ||
       task === 'use_cooker' ||
-      task === 'use_wardrobe'
+      task === 'use_wardrobe' ||
+      task === 'collect_washing'
     ) {
       this.applyNpcScaleForTexture(this.man, 'man-use-object');
       this.man.sprite.play('man-anim-use-object', true);
@@ -2137,6 +2195,62 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     this.playManIdle();
+  }
+
+  private showInteractiveObjectsForTask(task: TaskType): void {
+    INTERACTIVE_OBJECT_TYPES.forEach((config, objectType) => {
+      if (config.task !== task) {
+        return;
+      }
+      const sprite = this.interactiveObjectSprites.get(objectType);
+      if (sprite) {
+        sprite.setVisible(true);
+      }
+    });
+  }
+
+  private hideInteractiveObjectsForTask(task: TaskType, forceHide = false): void {
+    INTERACTIVE_OBJECT_TYPES.forEach((config, objectType) => {
+      if (config.task !== task) {
+        return;
+      }
+
+      // Washing machine is handled separately via collect_washing
+      if (objectType === 'washingmachine_3x4_full') {
+        return;
+      }
+
+      const sprite = this.interactiveObjectSprites.get(objectType);
+      if (!sprite) {
+        return;
+      }
+
+      if (forceHide || Math.random() >= FORGET_CHANCE) {
+        sprite.setVisible(false);
+      } else {
+        this.emitLog('system', `${this.identity.name} forgot to tidy up after using the ${textForTask(task).replace('use the ', '').replace('open a ', '')}.`);
+      }
+    });
+  }
+
+  private setInteractiveObjectVisible(objectType: string, visible: boolean): void {
+    const sprite = this.interactiveObjectSprites.get(objectType);
+    if (sprite) {
+      sprite.setVisible(visible);
+    }
+  }
+
+  private tickWashingCollect(time: number): void {
+    if (this.washingCollectDueAtMs <= 0 || time < this.washingCollectDueAtMs) {
+      return;
+    }
+
+    this.washingCollectDueAtMs = 0;
+    this.emitLog('system', `${this.identity.name} remembers the washing is done.`);
+    this.enqueueTask(
+      { type: 'collect_washing', source: 'system', priority: 45, resumable: true },
+      true
+    );
   }
 
   private playDogIdle(): void {
