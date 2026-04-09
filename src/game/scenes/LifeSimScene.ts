@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import houseLayout from '../../data/houseLayout.json';
 import { parsePlayerCommand } from '../sim/commandParser';
 import { runtimeContract, getWorldSizeFromContract, resolveTaskTargetCells } from '../sim/contract';
 import { createNavigationGrid, findNearestWalkableCell, findPathBfs, cellToWorldCenter, pickRandomWalkableCell, worldToCell, type NavigationGrid } from '../sim/navigation';
@@ -19,6 +20,8 @@ const DAILY_REFLECTION_DELAY_MS = 2_400;
 const FAST_COMMAND_WINDOW_MS = 2_600;
 const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
 const NPC_RENDER_Y_OFFSET = -10;
+const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
+const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -81,6 +84,20 @@ interface DelayedNarrativeEvent {
   atMs: number;
   type: 'letter_reply' | 'queue_followup' | 'daily_reflection';
   message?: string;
+}
+
+interface LayoutPlacedObject {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation?: number;
+  zIndex?: number;
+}
+
+function layoutObjectTextureKey(type: string): string {
+  return `${LAYOUT_OBJECT_TEXTURE_PREFIX}${type}`;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -167,6 +184,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
+  private missingLayoutTextureKeys = new Set<string>();
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -224,6 +242,11 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
       if (file.key === 'man-idle-stand' || file.key === 'man-sit-chair' || file.key === 'man-use-computer') {
         this.missingOptionalTextures.add(file.key);
+        return;
+      }
+
+      if (file.key.startsWith(LAYOUT_OBJECT_TEXTURE_PREFIX)) {
+        this.missingLayoutTextureKeys.add(file.key);
       }
     });
 
@@ -244,6 +267,12 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('dog-walk-up', '/sprites/dog-walking-up.png');
     this.load.image('dog-walk-left', '/sprites/dog-walking-left.png');
     this.load.image('dog-walk-right', '/sprites/dog-walking-right.png');
+
+    const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
+    const objectTypes = Array.from(new Set(layoutObjects.map((object) => object.type)));
+    objectTypes.forEach((type) => {
+      this.load.image(layoutObjectTextureKey(type), `/objects/${type}.png`);
+    });
   }
 
   create(): void {
@@ -255,12 +284,15 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const background = this.add.image(0, 0, 'background').setOrigin(0, 0);
     background.setDisplaySize(worldSize.width, worldSize.height);
+    background.setDepth(-1000);
 
     this.cameras.main.setBounds(0, 0, worldSize.width, worldSize.height);
     this.physics.world.setBounds(0, 0, worldSize.width, worldSize.height);
 
     this.grid = createNavigationGrid(runtimeContract);
     this.taskTargets = resolveTaskTargetCells(this.grid);
+
+    this.renderLayoutObjects();
 
     const manSpawn = runtimeContract.npcs.find((npc) => npc.id === 'man')?.spawn || { x: 1280, y: 1030 };
     const dogSpawn = runtimeContract.npcs.find((npc) => npc.id === 'dog')?.spawn || { x: 860, y: 1037 };
@@ -299,6 +331,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
     this.emitLog('system', 'Phase 6.4 enabled: request memory, pacing sensitivity, and daily reflections.');
     this.reportOptionalAnimationFallbacks();
+    this.reportMissingLayoutAssets();
     this.runStartupAudit();
     this.emitProfile();
   }
@@ -529,6 +562,49 @@ export default class LifeSimScene extends Phaser.Scene {
       if (this.missingOptionalTextures.has(item.key)) {
         this.emitLog('system', `Animation fallback active for ${item.label} (using ${item.fallback}).`);
       }
+    });
+  }
+
+  private reportMissingLayoutAssets(): void {
+    if (this.missingLayoutTextureKeys.size === 0) {
+      return;
+    }
+
+    const missingTypes = Array.from(this.missingLayoutTextureKeys)
+      .map((key) => key.replace(LAYOUT_OBJECT_TEXTURE_PREFIX, ''))
+      .sort();
+    this.emitLog('system', `Layout asset fallback: ${missingTypes.length} object texture(s) missing.`);
+    missingTypes.forEach((type) => {
+      this.emitLog('system', `Missing object texture: /objects/${type}.png`);
+    });
+  }
+
+  private renderLayoutObjects(): void {
+    const layoutObjects = ((houseLayout.objects as LayoutPlacedObject[]) || []).slice();
+    layoutObjects.sort((a, b) => {
+      const zA = a.zIndex ?? 0;
+      const zB = b.zIndex ?? 0;
+      if (zA !== zB) {
+        return zA - zB;
+      }
+      return a.y - b.y;
+    });
+
+    layoutObjects.forEach((object) => {
+      const textureKey = layoutObjectTextureKey(object.type);
+      if (!this.textures.exists(textureKey)) {
+        return;
+      }
+
+      const sprite = this.add.image(object.x, object.y, textureKey).setOrigin(0, 0);
+      sprite.setScale(typeof object.scale === 'number' ? object.scale : 1);
+
+      if (typeof object.rotation === 'number' && object.rotation !== 0) {
+        sprite.setRotation(Phaser.Math.DegToRad(object.rotation));
+      }
+
+      const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 0;
+      sprite.setDepth(object.y + zIndex * LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER);
     });
   }
 
