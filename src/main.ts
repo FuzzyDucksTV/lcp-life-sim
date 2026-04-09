@@ -134,27 +134,48 @@ const game = new Phaser.Game({
   },
 });
 
-const wireSceneEvents = (): void => {
-  scene.events.on('ui-log', (entry: CommandLogEntry) => {
+let eventsWired = false;
+let wireAttempts = 0;
+const MAX_WIRE_ATTEMPTS = 120;
+
+const tryWireSceneEvents = (): void => {
+  if (eventsWired) {
+    return;
+  }
+
+  const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
+  if (!runtimeScene || !runtimeScene.events) {
+    wireAttempts += 1;
+    if (wireAttempts >= MAX_WIRE_ATTEMPTS) {
+      statusLabel.textContent = 'Simulation failed to initialize scene events.';
+      return;
+    }
+    window.setTimeout(tryWireSceneEvents, 50);
+    return;
+  }
+
+  eventsWired = true;
+
+  runtimeScene.events.on('ui-log', (entry: CommandLogEntry) => {
     bridge.pushLog(entry);
   });
 
-  scene.events.on('ui-profile', (identity: ManIdentity) => {
+  runtimeScene.events.on('ui-profile', (identity: ManIdentity) => {
     bridge.renderProfile(identity);
   });
 
-  scene.events.on('ui-audio-cue', (cue: AudioCue) => {
+  runtimeScene.events.on('ui-audio-cue', (cue: AudioCue) => {
     audio.playCue(cue);
   });
 
-  scene.events.once(Phaser.Scenes.Events.CREATE, markSceneReady);
-  if (scene.sys.isActive()) {
+  runtimeScene.events.once(Phaser.Scenes.Events.CREATE, markSceneReady);
+  if (runtimeScene.sys.isActive()) {
     markSceneReady();
   }
 };
 
 if (game.isBooted) {
-  wireSceneEvents();
+  tryWireSceneEvents();
 } else {
-  game.events.once(Phaser.Core.Events.READY, wireSceneEvents);
+  game.events.once(Phaser.Core.Events.READY, tryWireSceneEvents);
 }
