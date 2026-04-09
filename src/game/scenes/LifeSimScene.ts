@@ -1636,6 +1636,9 @@ export default class LifeSimScene extends Phaser.Scene {
       }
       if (bedAnchor) {
         npc.sprite.setPosition(bedAnchor.x, this.toRenderY(bedAnchor.y, npc.id));
+        if (bedAnchor.foreground && npc.performUntilMs > 0) {
+          npc.sprite.depth = this.toLogicalY(npc.sprite.y, npc.id) + MAN_INTERACTION_DEPTH_BOOST;
+        }
       }
       if (time >= npc.performUntilMs) {
         this.finishManTask(npc.currentTask, time);
