@@ -610,10 +610,12 @@ export default class LifeSimScene extends Phaser.Scene {
         const frame = this.textures.get(textureKey).get(0);
         const frameWidth = Math.max(1, frame.width);
         const frameHeight = Math.max(1, frame.height);
-        sprite.setOrigin(opaque.minX / frameWidth, opaque.maxY / frameHeight);
+        const opaqueCenterX = (opaque.minX + opaque.maxX + 1) * 0.5;
+        const opaqueBottomY = opaque.maxY + 1;
+        sprite.setOrigin(opaqueCenterX / frameWidth, opaqueBottomY / frameHeight);
       } else {
         // Fallback if pixel bounds could not be determined.
-        sprite.setOrigin(0, 1);
+        sprite.setOrigin(0.5, 1);
       }
 
       sprite.setScale(typeof object.scale === 'number' ? object.scale : 1);
