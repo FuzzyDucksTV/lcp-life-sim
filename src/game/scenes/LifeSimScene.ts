@@ -46,6 +46,7 @@ const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
+const MAN_INTERACTION_DEPTH_BOOST = 50_000;
 const ACTION_ANCHOR_KEYS = [
   'sit_sofa',
   'sit_settee',
@@ -503,7 +504,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.applyOcclusionVisibility(this.man);
     this.applyOcclusionVisibility(this.dog);
-    this.man.sprite.depth = this.toLogicalY(this.man.sprite.y, 'man');
+    this.man.sprite.depth = this.getManDepth();
     this.dog.sprite.depth = this.toLogicalY(this.dog.sprite.y, 'dog');
   }
 
@@ -2164,6 +2165,17 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private toLogicalY(renderY: number, npcId: NpcRuntime['id']): number {
     return renderY - this.getRenderYOffset(npcId);
+  }
+
+  private isAnchoredInteractionTask(task: TaskType): boolean {
+    return Boolean(this.getActionAnchorPointForTask(task));
+  }
+
+  private getManDepth(): number {
+    const baseDepth = this.toLogicalY(this.man.sprite.y, 'man');
+    const isForegroundInteraction =
+      this.man.performUntilMs > 0 && this.man.path.length === 0 && this.isAnchoredInteractionTask(this.man.currentTask.type);
+    return isForegroundInteraction ? baseDepth + MAN_INTERACTION_DEPTH_BOOST : baseDepth;
   }
 
   private getDogCompanionCellNearMan(): CellKey | null {
