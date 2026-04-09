@@ -46,6 +46,36 @@ const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
+const ACTION_ANCHOR_KEYS = [
+  'sit_sofa',
+  'sit_settee',
+  'sit_computer_desk',
+  'sit_piano',
+  'lay_bed',
+  'take_shower',
+  'use_toilet',
+  'use_fridge',
+  'use_kitchen_sink',
+  'use_washing_machine',
+  'use_dishwasher',
+  'open_kitchen_cupboard',
+  'use_bookcase',
+  'use_running_machine',
+  'use_kitchen_worktop',
+  'use_cooker',
+  'use_wardrobe',
+] as const;
+
+type ActionAnchorKey = (typeof ACTION_ANCHOR_KEYS)[number];
+
+const TASK_ACTION_ANCHOR_KEYS: Partial<Record<TaskType, readonly ActionAnchorKey[]>> = {
+  sit_chair: ['sit_sofa', 'sit_settee'],
+  use_computer: ['sit_computer_desk'],
+  type_letter: ['sit_computer_desk'],
+  play_piano: ['sit_piano'],
+  play_another_song: ['sit_piano'],
+  use_running_machine: ['use_running_machine'],
+};
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -120,6 +150,11 @@ interface LayoutPlacedObject {
   zIndex?: number;
 }
 
+interface ActionAnchorPoint {
+  x: number;
+  y: number;
+}
+
 function layoutObjectTextureKey(type: string): string {
   return `${LAYOUT_OBJECT_TEXTURE_PREFIX}${type}`;
 }
@@ -185,6 +220,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private man!: NpcRuntime;
   private dog!: NpcRuntime;
   private taskTargets!: TaskTargets;
+  private actionAnchors: Partial<Record<ActionAnchorKey, ActionAnchorPoint>> = {};
   private manTaskQueue: NpcTask[] = [];
   private interruptedTaskStack: NpcTask[] = [];
   private playerRequests: PlayerRequestEnvelope[] = [];
@@ -354,6 +390,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.grid = createNavigationGrid(runtimeContract);
     this.taskTargets = resolveTaskTargetCells(this.grid);
+    this.actionAnchors = this.resolveActionAnchorsFromLayout();
 
     this.renderLayoutObjects();
 
@@ -668,6 +705,73 @@ export default class LifeSimScene extends Phaser.Scene {
     missingTypes.forEach((type) => {
       this.emitLog('system', `Missing object texture: /objects/${type}.png`);
     });
+  }
+
+  private resolveActionAnchorsFromLayout(): Partial<Record<ActionAnchorKey, ActionAnchorPoint>> {
+    const anchors: Partial<Record<ActionAnchorKey, ActionAnchorPoint>> = {};
+    const coordinateScale = getLayoutToWorldScale();
+    const layoutNavigation = (houseLayout as { navigation?: { action_anchors?: unknown; actionAnchors?: unknown } })
+      .navigation;
+    const runtimeAnchors = (runtimeContract as { interactionAnchors?: { actions?: unknown } }).interactionAnchors
+      ?.actions;
+
+    const applySource = (source: unknown, useLayoutScale: boolean): void => {
+      if (!source || typeof source !== 'object') {
+        return;
+      }
+
+      ACTION_ANCHOR_KEYS.forEach((key) => {
+        if (anchors[key]) {
+          return;
+        }
+
+        const point = (source as Record<string, unknown>)[key] as { x?: unknown; y?: unknown } | null;
+        if (!point || typeof point !== 'object') {
+          return;
+        }
+
+        const x = typeof point.x === 'number' && Number.isFinite(point.x) ? point.x : null;
+        const y = typeof point.y === 'number' && Number.isFinite(point.y) ? point.y : null;
+        if (x === null || y === null) {
+          return;
+        }
+
+        anchors[key] = {
+          x: useLayoutScale ? x * coordinateScale.x : x,
+          y: useLayoutScale ? y * coordinateScale.y : y,
+        };
+      });
+    };
+
+    applySource(layoutNavigation?.action_anchors ?? layoutNavigation?.actionAnchors, true);
+    applySource(runtimeAnchors, false);
+    return anchors;
+  }
+
+  private getActionAnchorPointForTask(task: TaskType): ActionAnchorPoint | null {
+    const candidates = TASK_ACTION_ANCHOR_KEYS[task];
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    for (const key of candidates) {
+      const point = this.actionAnchors[key];
+      if (point) {
+        return point;
+      }
+    }
+
+    return null;
+  }
+
+  private getActionAnchorTargetCell(task: TaskType): CellKey | null {
+    const point = this.getActionAnchorPointForTask(task);
+    if (!point) {
+      return null;
+    }
+
+    const cell = worldToCell(point, runtimeContract.gridSize);
+    return findNearestWalkableCell(this.grid, cell);
   }
 
   private renderLayoutObjects(): void {
@@ -1306,6 +1410,10 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (npc.performUntilMs === 0) {
       npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
+      const actionAnchor = this.getActionAnchorPointForTask(task);
+      if (actionAnchor) {
+        npc.sprite.setPosition(actionAnchor.x, this.toRenderY(actionAnchor.y, npc.id));
+      }
       if (task === 'dance') {
         this.applyNpcScaleForTexture(npc, 'man-walk-right');
         npc.sprite.play('man-anim-walk-right', true);
@@ -1371,16 +1479,16 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'pet_dog':
         return this.getDogInteractionCell();
       case 'sit_chair':
-        return this.taskTargets.chair;
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.chair;
       case 'use_computer':
-        return this.taskTargets.computerDesk || this.taskTargets.letterDesk;
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.computerDesk || this.taskTargets.letterDesk;
       case 'use_running_machine':
-        return this.taskTargets.runningMachine;
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.runningMachine;
       case 'play_piano':
       case 'play_another_song':
-        return this.taskTargets.piano;
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.piano;
       case 'type_letter':
-        return this.taskTargets.letterDesk;
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.letterDesk;
       default:
         return null;
     }
