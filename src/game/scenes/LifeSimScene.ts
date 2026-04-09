@@ -596,7 +596,9 @@ export default class LifeSimScene extends Phaser.Scene {
         return;
       }
 
-      const sprite = this.add.image(object.x, object.y, textureKey).setOrigin(0, 0);
+      // Layout coordinates from the house editor represent the object's floor-contact point on Y.
+      // Use bottom-left origin to match editor placement exactly.
+      const sprite = this.add.image(object.x, object.y, textureKey).setOrigin(0, 1);
       sprite.setScale(typeof object.scale === 'number' ? object.scale : 1);
 
       if (typeof object.rotation === 'number' && object.rotation !== 0) {
