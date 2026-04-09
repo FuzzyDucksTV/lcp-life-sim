@@ -70,11 +70,27 @@ type ActionAnchorKey = (typeof ACTION_ANCHOR_KEYS)[number];
 
 const TASK_ACTION_ANCHOR_KEYS: Partial<Record<TaskType, readonly ActionAnchorKey[]>> = {
   sit_chair: ['sit_sofa', 'sit_settee'],
+  sit_sofa: ['sit_sofa'],
+  sit_settee: ['sit_settee'],
+  sit_computer_desk: ['sit_computer_desk'],
+  sit_piano: ['sit_piano'],
+  lay_bed: ['lay_bed'],
+  take_shower: ['take_shower'],
+  use_toilet: ['use_toilet'],
+  use_fridge: ['use_fridge'],
+  use_kitchen_sink: ['use_kitchen_sink'],
+  use_washing_machine: ['use_washing_machine'],
+  use_dishwasher: ['use_dishwasher'],
+  open_kitchen_cupboard: ['open_kitchen_cupboard'],
+  use_bookcase: ['use_bookcase'],
   use_computer: ['sit_computer_desk'],
   type_letter: ['sit_computer_desk'],
   play_piano: ['sit_piano'],
   play_another_song: ['sit_piano'],
   use_running_machine: ['use_running_machine'],
+  use_kitchen_worktop: ['use_kitchen_worktop'],
+  use_cooker: ['use_cooker'],
+  use_wardrobe: ['use_wardrobe'],
 };
 
 interface NpcRuntime {
@@ -195,6 +211,38 @@ function textForTask(task: TaskType): string {
       return 'stand for a while';
     case 'sit_chair':
       return 'sit in a chair';
+    case 'sit_sofa':
+      return 'sit on the sofa';
+    case 'sit_settee':
+      return 'sit on the settee';
+    case 'sit_computer_desk':
+      return 'sit at the computer desk';
+    case 'sit_piano':
+      return 'sit at the piano';
+    case 'lay_bed':
+      return 'lay in bed';
+    case 'take_shower':
+      return 'take a shower';
+    case 'use_toilet':
+      return 'use the toilet';
+    case 'use_fridge':
+      return 'use the fridge';
+    case 'use_kitchen_sink':
+      return 'use the kitchen sink';
+    case 'use_washing_machine':
+      return 'use the washing machine';
+    case 'use_dishwasher':
+      return 'use the dishwasher';
+    case 'open_kitchen_cupboard':
+      return 'open a kitchen cupboard';
+    case 'use_bookcase':
+      return 'use the bookcase';
+    case 'use_kitchen_worktop':
+      return 'use the kitchen worktop';
+    case 'use_cooker':
+      return 'use the cooker';
+    case 'use_wardrobe':
+      return 'use the wardrobe';
     case 'use_computer':
       return 'use the computer';
     case 'type_letter':
@@ -1417,13 +1465,38 @@ export default class LifeSimScene extends Phaser.Scene {
       if (task === 'dance') {
         this.applyNpcScaleForTexture(npc, 'man-walk-right');
         npc.sprite.play('man-anim-walk-right', true);
-      } else if (task === 'sit_chair') {
+      } else if (task === 'sit_chair' || task === 'sit_sofa' || task === 'sit_settee') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
         npc.sprite.play('man-anim-sit-chair', true);
-      } else if (task === 'use_computer' || task === 'play_piano' || task === 'type_letter' || task === 'play_another_song') {
+      } else if (
+        task === 'use_computer' ||
+        task === 'play_piano' ||
+        task === 'type_letter' ||
+        task === 'play_another_song' ||
+        task === 'sit_computer_desk' ||
+        task === 'sit_piano'
+      ) {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-away', 'man-use-computer'));
         npc.sprite.play('man-anim-use-computer', true);
+      } else if (task === 'lay_bed') {
+        this.applyNpcScaleForTexture(npc, 'man-sleep');
+        npc.sprite.play('man-anim-sleep', true);
       } else if (task === 'use_running_machine') {
+        this.applyNpcScaleForTexture(npc, 'man-use-object');
+        npc.sprite.play('man-anim-use-object', true);
+      } else if (
+        task === 'take_shower' ||
+        task === 'use_toilet' ||
+        task === 'use_fridge' ||
+        task === 'use_kitchen_sink' ||
+        task === 'use_washing_machine' ||
+        task === 'use_dishwasher' ||
+        task === 'open_kitchen_cupboard' ||
+        task === 'use_bookcase' ||
+        task === 'use_kitchen_worktop' ||
+        task === 'use_cooker' ||
+        task === 'use_wardrobe'
+      ) {
         this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
       }
@@ -1446,13 +1519,41 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'pet_dog':
         return 6_500;
       case 'sit_chair':
+      case 'sit_sofa':
+      case 'sit_settee':
+      case 'sit_computer_desk':
+      case 'sit_piano':
         return 9_500;
+      case 'lay_bed':
+        return 12_000;
       case 'use_computer':
         return 11_000;
       case 'type_letter':
         return 12_000;
       case 'use_running_machine':
         return 10_000;
+      case 'take_shower':
+        return 11_000;
+      case 'use_toilet':
+        return 8_000;
+      case 'use_fridge':
+        return 7_000;
+      case 'use_kitchen_sink':
+        return 9_000;
+      case 'use_washing_machine':
+        return 10_000;
+      case 'use_dishwasher':
+        return 9_000;
+      case 'open_kitchen_cupboard':
+        return 7_500;
+      case 'use_bookcase':
+        return 8_500;
+      case 'use_kitchen_worktop':
+        return 9_500;
+      case 'use_cooker':
+        return 10_500;
+      case 'use_wardrobe':
+        return 8_500;
       case 'play_piano':
         return 12_000;
       case 'play_another_song':
@@ -1479,7 +1580,26 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'pet_dog':
         return this.getDogInteractionCell();
       case 'sit_chair':
+      case 'sit_sofa':
+      case 'sit_settee':
         return this.getActionAnchorTargetCell(task) || this.taskTargets.chair;
+      case 'sit_computer_desk':
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.computerDesk || this.taskTargets.letterDesk;
+      case 'sit_piano':
+        return this.getActionAnchorTargetCell(task) || this.taskTargets.piano;
+      case 'lay_bed':
+      case 'take_shower':
+      case 'use_toilet':
+      case 'use_fridge':
+      case 'use_kitchen_sink':
+      case 'use_washing_machine':
+      case 'use_dishwasher':
+      case 'open_kitchen_cupboard':
+      case 'use_bookcase':
+      case 'use_kitchen_worktop':
+      case 'use_cooker':
+      case 'use_wardrobe':
+        return this.getActionAnchorTargetCell(task);
       case 'use_computer':
         return this.getActionAnchorTargetCell(task) || this.taskTargets.computerDesk || this.taskTargets.letterDesk;
       case 'use_running_machine':
@@ -1521,6 +1641,22 @@ export default class LifeSimScene extends Phaser.Scene {
     return (
       task === 'pet_dog' ||
       task === 'sit_chair' ||
+      task === 'sit_sofa' ||
+      task === 'sit_settee' ||
+      task === 'sit_computer_desk' ||
+      task === 'sit_piano' ||
+      task === 'lay_bed' ||
+      task === 'take_shower' ||
+      task === 'use_toilet' ||
+      task === 'use_fridge' ||
+      task === 'use_kitchen_sink' ||
+      task === 'use_washing_machine' ||
+      task === 'use_dishwasher' ||
+      task === 'open_kitchen_cupboard' ||
+      task === 'use_bookcase' ||
+      task === 'use_kitchen_worktop' ||
+      task === 'use_cooker' ||
+      task === 'use_wardrobe' ||
       task === 'use_computer' ||
       task === 'use_running_machine' ||
       task === 'play_piano' ||
@@ -1717,19 +1853,50 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
-    if (task === 'sit_chair') {
+    if (task === 'sit_chair' || task === 'sit_sofa' || task === 'sit_settee') {
       this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
       this.man.sprite.play('man-anim-sit-chair', true);
       return;
     }
 
-    if (task === 'use_computer' || task === 'play_piano' || task === 'play_another_song' || task === 'type_letter') {
+    if (
+      task === 'use_computer' ||
+      task === 'play_piano' ||
+      task === 'play_another_song' ||
+      task === 'type_letter' ||
+      task === 'sit_computer_desk' ||
+      task === 'sit_piano'
+    ) {
       this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sit-away', 'man-use-computer'));
       this.man.sprite.play('man-anim-use-computer', true);
       return;
     }
 
+    if (task === 'lay_bed') {
+      this.applyNpcScaleForTexture(this.man, 'man-sleep');
+      this.man.sprite.play('man-anim-sleep', true);
+      return;
+    }
+
     if (task === 'use_running_machine') {
+      this.applyNpcScaleForTexture(this.man, 'man-use-object');
+      this.man.sprite.play('man-anim-use-object', true);
+      return;
+    }
+
+    if (
+      task === 'take_shower' ||
+      task === 'use_toilet' ||
+      task === 'use_fridge' ||
+      task === 'use_kitchen_sink' ||
+      task === 'use_washing_machine' ||
+      task === 'use_dishwasher' ||
+      task === 'open_kitchen_cupboard' ||
+      task === 'use_bookcase' ||
+      task === 'use_kitchen_worktop' ||
+      task === 'use_cooker' ||
+      task === 'use_wardrobe'
+    ) {
       this.applyNpcScaleForTexture(this.man, 'man-use-object');
       this.man.sprite.play('man-anim-use-object', true);
       return;

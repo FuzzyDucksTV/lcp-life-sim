@@ -7,6 +7,38 @@ function buildFeedback(intent: SimCommand['intent']): string {
       return 'I can ask him to pet the dog.';
     case 'sit_chair':
       return 'I can ask him to sit in a chair.';
+    case 'sit_sofa':
+      return 'I can ask him to sit on the sofa.';
+    case 'sit_settee':
+      return 'I can ask him to sit on the settee.';
+    case 'sit_computer_desk':
+      return 'I can ask him to sit at the computer desk.';
+    case 'sit_piano':
+      return 'I can ask him to sit at the piano.';
+    case 'lay_bed':
+      return 'I can ask him to lay in bed.';
+    case 'take_shower':
+      return 'I can ask him to take a shower.';
+    case 'use_toilet':
+      return 'I can ask him to use the toilet.';
+    case 'use_fridge':
+      return 'I can ask him to use the fridge.';
+    case 'use_kitchen_sink':
+      return 'I can ask him to use the kitchen sink.';
+    case 'use_washing_machine':
+      return 'I can ask him to use the washing machine.';
+    case 'use_dishwasher':
+      return 'I can ask him to use the dishwasher.';
+    case 'open_kitchen_cupboard':
+      return 'I can ask him to open a kitchen cupboard.';
+    case 'use_bookcase':
+      return 'I can ask him to use the bookcase.';
+    case 'use_kitchen_worktop':
+      return 'I can ask him to use the kitchen worktop.';
+    case 'use_cooker':
+      return 'I can ask him to use the cooker.';
+    case 'use_wardrobe':
+      return 'I can ask him to use the wardrobe.';
     case 'use_computer':
       return 'I can ask him to use the computer.';
     case 'type_letter':

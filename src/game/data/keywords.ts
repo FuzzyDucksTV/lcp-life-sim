@@ -15,6 +15,9 @@ const VOCAB_WORDS = [
   'subtract', 'teeth', 'tell', 'tickle', 'tidy', 'tired', 'troubles', 'try', 'tune', 'turntable', 'tv',
   'type', 'untidy', 'upstairs', 'utilities', 'use', 'water', 'war', 'what', 'whats', 'another', 'running',
   'machine', 'runningmachine', 'computerdesk', 'desk', 'sit', 'down', 'at', 'a', 'to', 'me', 'the', 'another', 'song',
+  'sofa', 'settee', 'bed', 'sleep', 'lay', 'lie', 'shower', 'bath', 'toilet', 'washing', 'washingmachine',
+  'dishwasher', 'washer', 'cupboard', 'bookcase', 'worktop', 'counter', 'cooker', 'wardrobe', 'stove',
+  'cook', 'read', 'turn', 'up', 'machine', 'take', 'lying',
 ] as const;
 
 export const VOCABULARY = new Set<string>(VOCAB_WORDS);
@@ -40,9 +43,83 @@ function includesAll(tokens: string[], required: string[]): boolean {
   return required.every((word) => tokens.includes(word));
 }
 
+function includesAny(tokens: string[], options: string[]): boolean {
+  return options.some((word) => tokens.includes(word));
+}
+
 export function inferIntent(tokens: string[]): TaskType | null {
   if (tokens.includes('pet') && (tokens.includes('dog') || tokens.includes('mutt') || tokens.includes('pooch'))) {
     return 'pet_dog';
+  }
+
+  if (includesAny(tokens, ['sit', 'use']) && tokens.includes('sofa')) {
+    return 'sit_sofa';
+  }
+
+  if (includesAny(tokens, ['sit', 'use']) && tokens.includes('settee')) {
+    return 'sit_settee';
+  }
+
+  if (
+    (tokens.includes('sit') && tokens.includes('computer') && tokens.includes('desk')) ||
+    (tokens.includes('sit') && tokens.includes('computerdesk'))
+  ) {
+    return 'sit_computer_desk';
+  }
+
+  if (tokens.includes('sit') && tokens.includes('piano')) {
+    return 'sit_piano';
+  }
+
+  if (
+    (includesAny(tokens, ['lay', 'lie', 'sleep', 'lying']) && includesAny(tokens, ['bed', 'bedroom'])) ||
+    includesAll(tokens, ['lay', 'bed'])
+  ) {
+    return 'lay_bed';
+  }
+
+  if (includesAll(tokens, ['take', 'shower']) || includesAll(tokens, ['use', 'shower']) || includesAll(tokens, ['bath', 'shower'])) {
+    return 'take_shower';
+  }
+
+  if (includesAny(tokens, ['use', 'sit']) && tokens.includes('toilet')) {
+    return 'use_toilet';
+  }
+
+  if (includesAny(tokens, ['use', 'open']) && includesAny(tokens, ['fridge', 'refrigerator', 'freezer'])) {
+    return 'use_fridge';
+  }
+
+  if (includesAny(tokens, ['use', 'kitchen']) && tokens.includes('sink')) {
+    return 'use_kitchen_sink';
+  }
+
+  if (tokens.includes('washingmachine') || includesAll(tokens, ['washing', 'machine'])) {
+    return 'use_washing_machine';
+  }
+
+  if (tokens.includes('dishwasher') || includesAll(tokens, ['dish', 'washer'])) {
+    return 'use_dishwasher';
+  }
+
+  if (includesAny(tokens, ['open', 'use']) && includesAny(tokens, ['cupboard', 'cabinet'])) {
+    return 'open_kitchen_cupboard';
+  }
+
+  if (tokens.includes('bookcase') && includesAny(tokens, ['use', 'open', 'read'])) {
+    return 'use_bookcase';
+  }
+
+  if (includesAny(tokens, ['use', 'cook']) && includesAny(tokens, ['worktop', 'counter'])) {
+    return 'use_kitchen_worktop';
+  }
+
+  if (includesAny(tokens, ['use', 'cook', 'turn']) && includesAny(tokens, ['cooker', 'stove'])) {
+    return 'use_cooker';
+  }
+
+  if (includesAny(tokens, ['use', 'open']) && includesAny(tokens, ['wardrobe', 'closet', 'dresser'])) {
+    return 'use_wardrobe';
   }
 
   if (

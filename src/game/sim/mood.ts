@@ -13,12 +13,32 @@ function clamp01(value: number): number {
 
 export function tickMood(mood: MoodState, deltaMs: number, activeTask: TaskType): MoodState {
   const minuteFactor = deltaMs / 60_000;
-  const isRest = activeTask === 'sleep' || activeTask === 'idle' || activeTask === 'idle_stand' || activeTask === 'sit_chair';
+  const isRest =
+    activeTask === 'sleep' ||
+    activeTask === 'idle' ||
+    activeTask === 'idle_stand' ||
+    activeTask === 'sit_chair' ||
+    activeTask === 'sit_sofa' ||
+    activeTask === 'sit_settee' ||
+    activeTask === 'sit_computer_desk' ||
+    activeTask === 'sit_piano' ||
+    activeTask === 'lay_bed';
   const isWork =
     activeTask === 'use_running_machine' ||
     activeTask === 'play_piano' ||
     activeTask === 'type_letter' ||
-    activeTask === 'use_computer';
+    activeTask === 'use_computer' ||
+    activeTask === 'use_washing_machine' ||
+    activeTask === 'use_dishwasher' ||
+    activeTask === 'use_kitchen_sink' ||
+    activeTask === 'use_kitchen_worktop' ||
+    activeTask === 'use_cooker' ||
+    activeTask === 'open_kitchen_cupboard' ||
+    activeTask === 'use_fridge' ||
+    activeTask === 'use_bookcase' ||
+    activeTask === 'use_wardrobe' ||
+    activeTask === 'take_shower' ||
+    activeTask === 'use_toilet';
   const isSocial = activeTask === 'pet_dog';
 
   const next: MoodState = {
