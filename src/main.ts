@@ -105,26 +105,17 @@ audioButton.addEventListener('click', () => {
   audioButton.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
 });
 
-scene.events.on('ui-log', (entry: CommandLogEntry) => {
-  bridge.pushLog(entry);
-});
-
-scene.events.on('ui-profile', (identity: ManIdentity) => {
-  bridge.renderProfile(identity);
-});
-
-scene.events.on('ui-audio-cue', (cue: AudioCue) => {
-  audio.playCue(cue);
-});
-
-scene.events.once(Phaser.Scenes.Events.CREATE, () => {
+const markSceneReady = (): void => {
+  if (sceneReady) {
+    return;
+  }
   sceneReady = true;
   setControlsEnabled(true);
   commandInput.focus();
   statusLabel.textContent = 'Simulation running (hidden AI mode).';
-});
+};
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game-canvas',
   width: worldSize.width,
@@ -142,3 +133,28 @@ new Phaser.Game({
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
 });
+
+const wireSceneEvents = (): void => {
+  scene.events.on('ui-log', (entry: CommandLogEntry) => {
+    bridge.pushLog(entry);
+  });
+
+  scene.events.on('ui-profile', (identity: ManIdentity) => {
+    bridge.renderProfile(identity);
+  });
+
+  scene.events.on('ui-audio-cue', (cue: AudioCue) => {
+    audio.playCue(cue);
+  });
+
+  scene.events.once(Phaser.Scenes.Events.CREATE, markSceneReady);
+  if (scene.sys.isActive()) {
+    markSceneReady();
+  }
+};
+
+if (game.isBooted) {
+  wireSceneEvents();
+} else {
+  game.events.once(Phaser.Core.Events.READY, wireSceneEvents);
+}
