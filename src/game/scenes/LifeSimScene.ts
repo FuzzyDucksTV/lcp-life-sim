@@ -12,6 +12,8 @@ const MAN_MOVE_SPEED = 74;
 const DOG_MOVE_SPEED = 86;
 const INTERRUPT_PRIORITY_PLAYER = 80;
 const INTERRUPT_PRIORITY_DOOR = 100;
+const MAX_PENDING_PLAYER_REQUESTS = 3;
+const LETTER_REPLY_DELAY_MS = 2_200;
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -55,6 +57,21 @@ interface RoutineBeat {
   endRatio: number;
   label: string;
   task: TaskType;
+}
+
+interface PlayerRequestEnvelope {
+  id: number;
+  raw: string;
+  normalized: string;
+  intent: TaskType;
+  enqueuedAtMs: number;
+  resolveAtMs: number;
+}
+
+interface DelayedNarrativeEvent {
+  id: number;
+  atMs: number;
+  type: 'letter_reply';
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -120,7 +137,11 @@ export default class LifeSimScene extends Phaser.Scene {
   private taskTargets!: TaskTargets;
   private manTaskQueue: NpcTask[] = [];
   private interruptedTaskStack: NpcTask[] = [];
+  private playerRequests: PlayerRequestEnvelope[] = [];
+  private delayedNarrativeEvents: DelayedNarrativeEvent[] = [];
   private commandOutcomes: boolean[] = [];
+  private requestSequence = 0;
+  private delayedEventSequence = 0;
   private dayIndex = 1;
   private dayElapsedMs = 0;
   private autoDeliveryTriggered = false;
@@ -262,7 +283,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
-    this.emitLog('system', 'Phase 6.2 enabled: deterministic routine, interrupt/resume tasks, and dog interaction beats.');
+    this.emitLog('system', 'Phase 6.3 enabled: delayed request responses, letter loop, and stronger social simulation.');
     this.reportOptionalAnimationFallbacks();
     this.runStartupAudit();
     this.emitProfile();
@@ -272,6 +293,8 @@ export default class LifeSimScene extends Phaser.Scene {
     const deltaMs = Math.min(delta, 50);
 
     this.advanceDay(deltaMs);
+    this.tickPlayerRequests(time);
+    this.tickNarrativeEvents(time);
     this.tickMan(deltaMs, time);
     this.tickDog(deltaMs, time);
 
@@ -334,9 +357,13 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
-    const accepts = this.rollCommandAcceptance(command.intent);
-    if (!accepts) {
-      this.emitLog('man', `${this.identity.name} seems unwilling right now.`);
+    const intendedTask = this.resolveTaskWithAvailability(command.intent);
+    if (intendedTask !== command.intent) {
+      this.emitLog('system', `That request is unavailable in this layout. Falling back to ${textForTask(intendedTask)}.`);
+    }
+
+    if (this.playerRequests.length >= MAX_PENDING_PLAYER_REQUESTS) {
+      this.emitLog('man', `${this.identity.name} seems overloaded and ignores the extra request.`);
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
@@ -344,26 +371,20 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
-    const intendedTask = this.resolveTaskWithAvailability(command.intent);
-    if (intendedTask !== command.intent) {
-      this.emitLog('system', `That request is unavailable in this layout. Falling back to ${textForTask(intendedTask)}.`);
-    }
+    const envelope: PlayerRequestEnvelope = {
+      id: ++this.requestSequence,
+      raw: rawInput,
+      normalized: command.normalized,
+      intent: intendedTask,
+      enqueuedAtMs: this.time.now,
+      resolveAtMs: this.time.now + this.getRequestResponseDelayMs(intendedTask, this.playerRequests.length),
+    };
 
-    this.requestPriorityTask(
-      {
-        type: intendedTask,
-        fromPlayerCommand: command.normalized,
-        source: 'player',
-        priority: INTERRUPT_PRIORITY_PLAYER,
-        resumable: true,
-      },
-      'player command'
-    );
-    this.emitLog('man', `Okay, I will ${textForTask(intendedTask)}.`);
-    this.recordCommandOutcome(true);
-    this.identity.mood = onCommandAccepted(this.identity.mood);
-    this.emitAudioCue('positive');
-    this.emitProfile();
+    this.playerRequests.push(envelope);
+    this.emitLog('man', `${this.identity.name} is considering your request.`);
+    if (this.playerRequests.length > 1) {
+      this.emitLog('system', `Request queue: ${this.playerRequests.length} pending.`);
+    }
   }
 
   private prepareAllAnimations(): void {
@@ -521,6 +542,8 @@ export default class LifeSimScene extends Phaser.Scene {
       this.deliveryQueued = false;
       this.lastRoutineBeatIndex = -1;
       this.interruptedTaskStack = [];
+      this.playerRequests = [];
+      this.delayedNarrativeEvents = [];
       this.emitLog('system', `Day ${this.dayIndex} begins.`);
       this.emitAudioCue('routine_shift');
       saveSnapshot({
@@ -529,6 +552,108 @@ export default class LifeSimScene extends Phaser.Scene {
         dayIndex: this.dayIndex,
       });
     }
+  }
+
+  private getRequestResponseDelayMs(intent: TaskType, pendingAhead: number): number {
+    const baseMs = 1_200;
+    const moodDelayMs = this.identity.mood.irritation * 1_400 + (1 - this.identity.mood.focus) * 1_000;
+    const queueDelayMs = pendingAhead * 900;
+    const intentDelayMs = intent === 'type_letter' ? 600 : 0;
+    return Math.round(clamp(baseMs + moodDelayMs + queueDelayMs + intentDelayMs, 900, 7_200));
+  }
+
+  private tickPlayerRequests(time: number): void {
+    if (this.playerRequests.length === 0) {
+      return;
+    }
+
+    const dueRequests = this.playerRequests.filter((request) => request.resolveAtMs <= time);
+    if (dueRequests.length === 0) {
+      return;
+    }
+
+    this.playerRequests = this.playerRequests.filter((request) => request.resolveAtMs > time);
+    dueRequests.forEach((request, index) => {
+      const remaining = this.playerRequests.length + (dueRequests.length - index - 1);
+      this.resolvePlayerRequest(request, remaining);
+    });
+  }
+
+  private resolvePlayerRequest(request: PlayerRequestEnvelope, remainingQueueDepth: number): void {
+    const accepts = this.rollCommandAcceptance(request.intent, remainingQueueDepth);
+    if (!accepts) {
+      this.emitLog('man', this.getRequestRejectionLine());
+      this.recordCommandOutcome(false);
+      this.identity.mood = onCommandRejected(this.identity.mood);
+      this.emitAudioCue('negative');
+      this.emitProfile();
+      return;
+    }
+
+    this.requestPriorityTask(
+      {
+        type: request.intent,
+        fromPlayerCommand: request.normalized,
+        source: 'player',
+        priority: INTERRUPT_PRIORITY_PLAYER,
+        resumable: true,
+      },
+      'player request'
+    );
+    this.emitLog('man', this.getRequestAcceptanceLine(request.intent, remainingQueueDepth));
+    this.recordCommandOutcome(true);
+    this.identity.mood = onCommandAccepted(this.identity.mood);
+    this.emitAudioCue('positive');
+    this.emitProfile();
+  }
+
+  private getRequestAcceptanceLine(intent: TaskType, remainingQueueDepth: number): string {
+    if (remainingQueueDepth > 0) {
+      return `Okay. I will ${textForTask(intent)} after I clear a few things.`;
+    }
+    return `Okay, I will ${textForTask(intent)}.`;
+  }
+
+  private getRequestRejectionLine(): string {
+    if (this.identity.mood.irritation > 0.65) {
+      return `${this.identity.name} seems irritated and refuses this request.`;
+    }
+    if (this.identity.mood.energy < 0.35) {
+      return `${this.identity.name} looks too tired to do that right now.`;
+    }
+    return `${this.identity.name} decides not to do that right now.`;
+  }
+
+  private tickNarrativeEvents(time: number): void {
+    if (this.delayedNarrativeEvents.length === 0) {
+      return;
+    }
+
+    const dueEvents = this.delayedNarrativeEvents.filter((event) => event.atMs <= time);
+    if (dueEvents.length === 0) {
+      return;
+    }
+
+    this.delayedNarrativeEvents = this.delayedNarrativeEvents.filter((event) => event.atMs > time);
+    dueEvents.forEach((event) => {
+      if (event.type === 'letter_reply') {
+        this.emitLog('man', this.composeLetterReply());
+        this.emitAudioCue('positive');
+      }
+    });
+  }
+
+  private composeLetterReply(): string {
+    if (this.identity.mood.warmth > 0.7) {
+      return 'He leaves a short letter: "Thank you for the note. I am in a good mood today."';
+    }
+    if (this.identity.mood.irritation > 0.68) {
+      return 'He writes a brief letter: "I read your note. Please give me some space for now."';
+    }
+    if (this.identity.personality.diligence > 0.7) {
+      return 'He writes: "Message received. I will keep to the routine and report back later."';
+    }
+    return 'He writes: "I got your note. I will do what I can today."';
   }
 
   private enqueueTask(task: NpcTask, toFront = false): void {
@@ -637,7 +762,7 @@ export default class LifeSimScene extends Phaser.Scene {
     return true;
   }
 
-  private rollCommandAcceptance(intent: TaskType): boolean {
+  private getCommandAcceptanceChance(intent: TaskType, queueDepthPenalty = 0): number {
     const acceptCount = this.commandOutcomes.filter(Boolean).length;
     const rejectCount = this.commandOutcomes.length - acceptCount;
 
@@ -649,7 +774,12 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const isPlayfulTask = intent === 'dance' || intent === 'pet_dog';
     const taskBias = isPlayfulTask ? this.identity.personality.playfulness * 0.2 : this.identity.personality.diligence * 0.15;
-    return Math.random() < clamp(chance + taskBias, 0.08, 0.95);
+    const queuePenalty = Math.min(0.22, queueDepthPenalty * 0.08);
+    return clamp(chance + taskBias - queuePenalty, 0.08, 0.95);
+  }
+
+  private rollCommandAcceptance(intent: TaskType, queueDepthPenalty = 0): boolean {
+    return Math.random() < this.getCommandAcceptanceChance(intent, queueDepthPenalty);
   }
 
   private recordCommandOutcome(accepted: boolean): void {
@@ -753,7 +883,7 @@ export default class LifeSimScene extends Phaser.Scene {
         npc.sprite.play('man-anim-idle-stand', true);
       }
       if (time >= npc.performUntilMs) {
-        this.finishManTask();
+        this.finishManTask(npc.currentTask, time);
       }
       return;
     }
@@ -764,7 +894,7 @@ export default class LifeSimScene extends Phaser.Scene {
       }
       const done = this.moveNpcToCell(npc, npc.pendingTargetCell, time);
       if (done) {
-        this.finishManTask();
+        this.finishManTask(npc.currentTask, time);
       }
       return;
     }
@@ -775,7 +905,7 @@ export default class LifeSimScene extends Phaser.Scene {
         npc.sprite.play('man-anim-sleep', true);
       }
       if (time >= npc.performUntilMs) {
-        this.finishManTask();
+        this.finishManTask(npc.currentTask, time);
       }
       return;
     }
@@ -803,7 +933,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
       if (time >= npc.performUntilMs) {
         this.dogInteractionCooldownUntilMs = time + 45_000;
-        this.finishManTask();
+        this.finishManTask(npc.currentTask, time);
       }
       return;
     }
@@ -834,7 +964,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (time >= npc.performUntilMs) {
-      this.finishManTask();
+      this.finishManTask(npc.currentTask, time);
     } else {
       // Keep subtle frame progression with animated clips.
       npc.sprite.anims.timeScale = 1 + deltaMs * 0.0001;
@@ -958,12 +1088,31 @@ export default class LifeSimScene extends Phaser.Scene {
     return 'idle';
   }
 
-  private finishManTask(): void {
+  private finishManTask(completedTask?: NpcTask, completedAtMs?: number): void {
+    if (completedTask && completedAtMs !== undefined) {
+      this.onTaskCompleted(completedTask, completedAtMs);
+    }
+
     this.man.currentTask = { type: 'idle', source: 'system', priority: 0, resumable: false };
     this.man.performUntilMs = 0;
     this.man.pendingTargetCell = null;
     this.man.path = [];
     this.playManIdle();
+  }
+
+  private onTaskCompleted(task: NpcTask, completedAtMs: number): void {
+    if (task.source === 'player') {
+      this.emitLog('system', `Request completed: ${textForTask(task.type)}.`);
+    }
+
+    if (task.type === 'type_letter' && task.source === 'player') {
+      this.emitLog('system', `${this.identity.name} finished writing a reply.`);
+      this.delayedNarrativeEvents.push({
+        id: ++this.delayedEventSequence,
+        atMs: completedAtMs + LETTER_REPLY_DELAY_MS,
+        type: 'letter_reply',
+      });
+    }
   }
 
   private moveNpcToCell(npc: NpcRuntime, targetCell: CellKey, time: number): boolean {
