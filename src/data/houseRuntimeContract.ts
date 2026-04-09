@@ -107,6 +107,16 @@ export const houseRuntimeContract = {
         "x": 926.9332475677569,
         "y": 257.86666107177734,
         "foreground": true
+      },
+      "dog_eating": {
+        "x": 136.93330852574644,
+        "y": 1076.6666717529297,
+        "foreground": true
+      },
+      "dog_sleeping": {
+        "x": 1179.9332280457677,
+        "y": 991.3333740234375,
+        "foreground": true
       }
     }
   },
