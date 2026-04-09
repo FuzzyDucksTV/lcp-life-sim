@@ -86,6 +86,7 @@ const ACTION_ANCHOR_KEYS = [
   'use_kitchen_worktop',
   'use_cooker',
   'use_wardrobe',
+  'use_tv',
   'dog_eating',
   'dog_sleeping',
 ] as const;
@@ -116,6 +117,7 @@ const TASK_ACTION_ANCHOR_KEYS: Partial<Record<TaskType, readonly ActionAnchorKey
   use_cooker: ['use_cooker'],
   use_wardrobe: ['use_wardrobe'],
   collect_washing: ['use_washing_machine'],
+  use_tv: ['use_tv'],
 };
 
 interface NpcRuntime {
@@ -285,6 +287,8 @@ function textForTask(task: TaskType): string {
       return 'eat some food';
     case 'collect_washing':
       return 'collect the washing';
+    case 'use_tv':
+      return 'watch TV';
     case 'door_delivery':
       return 'check the door';
     default:
@@ -1552,6 +1556,14 @@ export default class LifeSimScene extends Phaser.Scene {
     const task = npc.currentTask.type;
     const actionAnchorForTask = this.getActionAnchorPointForTask(task);
 
+    // Redirect standalone use_cooker to full cooking chain starting from fridge
+    if (task === 'use_cooker' && npc.currentTask.fromPlayerCommand !== 'cooking_chain' && npc.performUntilMs === 0) {
+      npc.currentTask = { type: 'use_fridge', source: npc.currentTask.source, priority: npc.currentTask.priority ?? 50, resumable: false, fromPlayerCommand: 'cooking_chain' };
+      npc.pendingTargetCell = null;
+      npc.path = [];
+      return;
+    }
+
     if (task === 'idle' || task === 'idle_stand') {
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
@@ -1690,7 +1702,8 @@ export default class LifeSimScene extends Phaser.Scene {
         task === 'use_kitchen_worktop' ||
         task === 'use_cooker' ||
         task === 'use_wardrobe' ||
-        task === 'collect_washing'
+        task === 'collect_washing' ||
+        task === 'use_tv'
       ) {
         this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
@@ -1763,6 +1776,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return between(10_000, 20_000);
       case 'collect_washing':
         return between(8_000, 12_000);
+      case 'use_tv':
+        return between(8_000, 15_000);
       default:
         return between(20_000, 35_000);
     }
@@ -1816,6 +1831,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return this.getActionAnchorTargetCell('use_cooker');
       case 'collect_washing':
         return this.getActionAnchorTargetCell('use_washing_machine');
+      case 'use_tv':
+        return this.getActionAnchorTargetCell('use_tv');
       default:
         return null;
     }
@@ -1871,6 +1888,7 @@ export default class LifeSimScene extends Phaser.Scene {
       task === 'type_letter' ||
       task === 'eating_food' ||
       task === 'collect_washing' ||
+      task === 'use_tv' ||
       task === 'door_delivery'
     );
   }
@@ -1926,6 +1944,26 @@ export default class LifeSimScene extends Phaser.Scene {
       });
     }
 
+    // Cooking chain: use_fridge → use_kitchen_worktop → use_cooker → eating_food → use_dishwasher
+    if (task.type === 'use_fridge' && task.fromPlayerCommand === 'cooking_chain') {
+      this.hideInteractiveObjectsForTask('use_fridge');
+      this.emitLog('man', `${this.identity.name} got ingredients and moves to the worktop.`);
+      this.enqueueTask(
+        { type: 'use_kitchen_worktop', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'cooking_chain' },
+        true
+      );
+    } else if (task.type === 'use_fridge') {
+      this.hideInteractiveObjectsForTask('use_fridge');
+    }
+
+    if (task.type === 'use_kitchen_worktop' && task.fromPlayerCommand === 'cooking_chain') {
+      this.emitLog('man', `${this.identity.name} finished preparing and starts cooking.`);
+      this.enqueueTask(
+        { type: 'use_cooker', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'cooking_chain' },
+        true
+      );
+    }
+
     if (task.type === 'use_cooker') {
       this.hideInteractiveObjectsForTask('use_cooker');
       this.emitLog('man', `${this.identity.name} finished cooking and sits down to eat.`);
@@ -1943,10 +1981,6 @@ export default class LifeSimScene extends Phaser.Scene {
       );
     }
 
-    if (task.type === 'use_fridge') {
-      this.hideInteractiveObjectsForTask('use_fridge');
-    }
-
     if (task.type === 'open_kitchen_cupboard') {
       this.hideInteractiveObjectsForTask('open_kitchen_cupboard');
     }
@@ -1957,6 +1991,41 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (task.type === 'use_wardrobe') {
       this.hideInteractiveObjectsForTask('use_wardrobe');
+    }
+
+    // Post-delivery chain: door → cupboard or fridge
+    if (task.type === 'door_delivery') {
+      const goToFridge = Math.random() < 0.5;
+      if (goToFridge) {
+        this.emitLog('man', `${this.identity.name} takes the delivery to the fridge.`);
+        this.enqueueTask(
+          { type: 'use_fridge', source: 'system', priority: 50, resumable: false },
+          true
+        );
+      } else {
+        this.emitLog('man', `${this.identity.name} takes the delivery to the cupboard.`);
+        this.enqueueTask(
+          { type: 'open_kitchen_cupboard', source: 'system', priority: 50, resumable: false },
+          true
+        );
+      }
+    }
+
+    // TV ↔ settee loop: use_tv → sit_settee (2 min) → use_tv
+    if (task.type === 'use_tv') {
+      this.emitLog('man', `${this.identity.name} goes to sit on the settee.`);
+      this.enqueueTask(
+        { type: 'sit_settee', source: 'system', priority: 50, resumable: false, remainingMs: 120_000, fromPlayerCommand: 'tv_loop' },
+        true
+      );
+    }
+
+    if (task.type === 'sit_settee' && task.fromPlayerCommand === 'tv_loop') {
+      this.emitLog('man', `${this.identity.name} gets up to use the TV again.`);
+      this.enqueueTask(
+        { type: 'use_tv', source: 'system', priority: 50, resumable: false },
+        true
+      );
     }
 
     if (task.type === 'use_washing_machine') {
@@ -2187,7 +2256,8 @@ export default class LifeSimScene extends Phaser.Scene {
       task === 'use_kitchen_worktop' ||
       task === 'use_cooker' ||
       task === 'use_wardrobe' ||
-      task === 'collect_washing'
+      task === 'collect_washing' ||
+      task === 'use_tv'
     ) {
       this.applyNpcScaleForTexture(this.man, 'man-use-object');
       this.man.sprite.play('man-anim-use-object', true);
@@ -2333,6 +2403,22 @@ export default class LifeSimScene extends Phaser.Scene {
     const resolvedTask = this.resolveTaskWithAvailability(task);
     if (resolvedTask !== task && beatChanged) {
       this.emitLog('system', `Routine fallback: ${textForTask(task)} unavailable, using ${textForTask(resolvedTask)}.`);
+    }
+
+    // Wardrobe before sleep: queue wardrobe first, then sleep/lay_bed
+    if (resolvedTask === 'sleep' && beatChanged && this.isTaskAvailable('use_wardrobe')) {
+      this.man.currentTask = { type: 'use_wardrobe', source: 'routine', priority: 10, resumable: false };
+      this.man.performUntilMs = 0;
+      this.enqueueTask({ type: resolvedTask, source: 'routine', priority: 10, resumable: true });
+      return;
+    }
+
+    // Wardrobe after wake: queue wardrobe when the morning starts
+    if (resolvedTask === 'idle_stand' && beatChanged && beatIndex === 0 && this.isTaskAvailable('use_wardrobe')) {
+      this.man.currentTask = { type: 'use_wardrobe', source: 'routine', priority: 10, resumable: false };
+      this.man.performUntilMs = 0;
+      this.enqueueTask({ type: resolvedTask, source: 'routine', priority: 10, resumable: true });
+      return;
     }
 
     this.man.currentTask = { type: resolvedTask, source: 'routine', priority: 10, resumable: true };
