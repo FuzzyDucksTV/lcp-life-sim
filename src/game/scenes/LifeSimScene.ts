@@ -51,6 +51,11 @@ const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
 const MAN_INTERACTION_DEPTH_BOOST = 50_000;
+const DOG_SLEEP_DURATION_MIN_MS = 120_000;
+const DOG_SLEEP_DURATION_MAX_MS = 240_000;
+const DOG_EAT_DURATION_MS = 20_000;
+const DOG_SLEEP_CHANCE = 0.12;
+const DOG_EAT_CHANCE = 0.08;
 const ACTION_ANCHOR_KEYS = [
   'sit_sofa',
   'sit_settee',
@@ -69,6 +74,8 @@ const ACTION_ANCHOR_KEYS = [
   'use_kitchen_worktop',
   'use_cooker',
   'use_wardrobe',
+  'dog_eating',
+  'dog_sleeping',
 ] as const;
 
 type ActionAnchorKey = (typeof ACTION_ANCHOR_KEYS)[number];
@@ -297,6 +304,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private lastProfilePushAt = 0;
   private lastRoutineBeatIndex = -1;
   private dogInteractionCooldownUntilMs = 0;
+  private dogActivityCooldownUntilMs = 0;
   private startupExplorationQueued = false;
   private startupExplorationDueAtMs = STARTUP_EXPLORATION_DELAY_MS;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
@@ -442,6 +450,14 @@ export default class LifeSimScene extends Phaser.Scene {
     { animationKey: 'dog-anim-walk-up', texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-left', texture: 'dog-walk-left', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-right', texture: 'dog-walk-right', frameCount: 16, framesPerRow: 4, frameRate: 12 },
+    {
+      animationKey: 'dog-anim-eating-food',
+      texture: 'dog-eating-food',
+      fallbackTexture: 'dog-idle',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 6,
+    },
   ];
 
   constructor() {
@@ -459,6 +475,7 @@ export default class LifeSimScene extends Phaser.Scene {
         'man-dance',
         'man-knock',
         'man-running-machine',
+        'dog-eating-food',
         'man-eating-food',
         'man-in-shower',
         'man-on-toilet',
@@ -507,6 +524,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('dog-walk-right', '/sprites/dog-walking-right.png');
     this.load.image('dog-idle', '/sprites/dog-idle-36frames.png');
     this.load.image('dog-sleep', '/sprites/dog-sleeping-36frames.png');
+    this.load.image('dog-eating-food', '/sprites/dog-eatingfood.png');
 
     const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
     const objectTypes = Array.from(new Set(layoutObjects.map((object) => object.type)));
@@ -854,6 +872,7 @@ export default class LifeSimScene extends Phaser.Scene {
       { key: 'man-in-shower', label: 'in shower', fallback: 'man-use-object' },
       { key: 'man-on-toilet', label: 'on toilet', fallback: 'man-use-object' },
       { key: 'man-sitting-settee', label: 'sitting settee', fallback: 'man-sit-chair' },
+      { key: 'dog-eating-food', label: 'dog eating', fallback: 'dog-idle' },
       { key: 'dog-idle', label: 'dog idle', fallback: 'dog-walk-down' },
       { key: 'dog-sleep', label: 'dog sleep', fallback: 'dog-walk-down' },
     ];
@@ -2138,6 +2157,24 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
+  private playDogEating(): void {
+    const texture = this.resolveTexture('dog-eating-food', 'dog-idle');
+    this.applyNpcScaleForTexture(this.dog, texture);
+    this.dog.sprite.play('dog-anim-eating-food', true);
+    if (texture === 'dog-idle' || texture === 'dog-walk-down') {
+      this.pauseCurrentAnimation(this.dog.sprite);
+    }
+  }
+
+  private getDogAnchorTargetCell(anchorKey: ActionAnchorKey): CellKey | null {
+    const point = this.actionAnchors[anchorKey];
+    if (!point) {
+      return null;
+    }
+    const cell = worldToCell(point, runtimeContract.gridSize);
+    return findNearestWalkableCell(this.grid, cell);
+  }
+
   private playNpcIdle(npc: NpcRuntime): void {
     if (npc.id === 'man') {
       this.playManIdle();
@@ -2339,6 +2376,8 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private tickDog(_deltaMs: number, time: number): void {
     if (this.man.currentTask.type === 'pet_dog') {
+      this.dog.currentTask = { type: 'idle' };
+      this.dog.performUntilMs = 0;
       const target = this.getDogCompanionCellNearMan();
       if (target) {
         const reached = this.moveNpcToCell(this.dog, target, time);
@@ -2353,17 +2392,129 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const dayRatio = this.dayElapsedMs / DAY_DURATION_MS;
 
+    // Night sleep — always sleep after 90% of day at the anchor if available
     if (dayRatio > 0.9) {
-      this.dog.currentTask = { type: 'sleep' };
-      this.dog.path = [];
-      this.playDogSleep();
+      if (this.dog.currentTask.type !== 'sleep') {
+        this.dog.currentTask = { type: 'sleep' };
+        this.dog.performUntilMs = 0;
+      }
+      const sleepAnchorCell = this.getDogAnchorTargetCell('dog_sleeping');
+      if (sleepAnchorCell && !this.isNpcAtCell(this.dog, sleepAnchorCell)) {
+        const reached = this.moveNpcToCell(this.dog, sleepAnchorCell, time);
+        if (reached) {
+          const anchor = this.actionAnchors['dog_sleeping'];
+          if (anchor) {
+            this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+          }
+          this.playDogSleep();
+        }
+      } else {
+        this.dog.path = [];
+        if (sleepAnchorCell) {
+          const anchor = this.actionAnchors['dog_sleeping'];
+          if (anchor) {
+            this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+          }
+        }
+        this.playDogSleep();
+      }
       return;
     }
 
+    // Dog is performing a timed activity (sleeping or eating during the day)
+    if (this.dog.performUntilMs > 0) {
+      if (time < this.dog.performUntilMs) {
+        return;
+      }
+      // Activity finished
+      this.dog.performUntilMs = 0;
+      this.dog.currentTask = { type: 'wander' };
+      this.dogActivityCooldownUntilMs = time + 60_000;
+      this.playDogIdle();
+    }
+
+    // Wake from night sleep if day started again
     if (this.dog.currentTask.type === 'sleep') {
       this.dog.currentTask = { type: 'wander' };
     }
 
+    // Pick a new activity when the dog finishes wandering and is idle
+    if (this.dog.path.length === 0 && this.dog.currentTask.type === 'wander' && time >= this.dogActivityCooldownUntilMs) {
+      const roll = Math.random();
+
+      // Try to nap at anchor
+      if (roll < DOG_SLEEP_CHANCE) {
+        const sleepCell = this.getDogAnchorTargetCell('dog_sleeping');
+        if (sleepCell) {
+          this.dog.currentTask = { type: 'sleep' };
+          this.dog.pendingTargetCell = sleepCell;
+          const reached = this.moveNpcToCell(this.dog, sleepCell, time);
+          if (reached) {
+            const anchor = this.actionAnchors['dog_sleeping'];
+            if (anchor) {
+              this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+            }
+            this.dog.performUntilMs = time + Phaser.Math.Between(DOG_SLEEP_DURATION_MIN_MS, DOG_SLEEP_DURATION_MAX_MS);
+            this.playDogSleep();
+            this.emitLog('system', 'The dog curls up for a nap.');
+          }
+          return;
+        }
+      }
+
+      // Try to eat at anchor
+      if (roll < DOG_SLEEP_CHANCE + DOG_EAT_CHANCE) {
+        const eatCell = this.getDogAnchorTargetCell('dog_eating');
+        if (eatCell) {
+          this.dog.currentTask = { type: 'idle' };
+          this.dog.pendingTargetCell = eatCell;
+          const reached = this.moveNpcToCell(this.dog, eatCell, time);
+          if (reached) {
+            const anchor = this.actionAnchors['dog_eating'];
+            if (anchor) {
+              this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+            }
+            this.dog.performUntilMs = time + DOG_EAT_DURATION_MS;
+            this.playDogEating();
+            this.emitLog('system', 'The dog eats some food.');
+          }
+          return;
+        }
+      }
+    }
+
+    // Dog is walking to a sleep/eat anchor — keep moving
+    if (this.dog.currentTask.type === 'sleep' && this.dog.pendingTargetCell) {
+      const sleepCell = this.dog.pendingTargetCell;
+      const reached = this.moveNpcToCell(this.dog, sleepCell, time);
+      if (reached) {
+        const anchor = this.actionAnchors['dog_sleeping'];
+        if (anchor) {
+          this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+        }
+        this.dog.performUntilMs = time + Phaser.Math.Between(DOG_SLEEP_DURATION_MIN_MS, DOG_SLEEP_DURATION_MAX_MS);
+        this.playDogSleep();
+        this.emitLog('system', 'The dog curls up for a nap.');
+      }
+      return;
+    }
+
+    if (this.dog.currentTask.type === 'idle' && this.dog.pendingTargetCell && this.dog.performUntilMs === 0) {
+      const eatCell = this.dog.pendingTargetCell;
+      const reached = this.moveNpcToCell(this.dog, eatCell, time);
+      if (reached) {
+        const anchor = this.actionAnchors['dog_eating'];
+        if (anchor) {
+          this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
+        }
+        this.dog.performUntilMs = time + DOG_EAT_DURATION_MS;
+        this.playDogEating();
+        this.emitLog('system', 'The dog eats some food.');
+      }
+      return;
+    }
+
+    // Default wandering behavior
     if (this.dog.path.length === 0) {
       const manCell = worldToCell({ x: this.man.sprite.x, y: this.toLogicalY(this.man.sprite.y, 'man') }, runtimeContract.gridSize);
       const followBias = Math.random() < 0.6;
