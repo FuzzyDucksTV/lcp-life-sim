@@ -22,6 +22,13 @@ const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
 const NPC_RENDER_Y_OFFSET = -10;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
+const LAYOUT_OBJECT_POSITION_OVERRIDES: Record<string, { x?: number; y?: number }> = {
+  // Fine-tuned to match the editor export preview for these assets.
+  bath_4x3_5_idle: { y: -8 },
+  toilet_4x4_idle: { y: -10 },
+  computerdesk_4x4_idle: { x: -52 },
+  calendar_1x1_idle: { x: -22 },
+};
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -604,7 +611,11 @@ export default class LifeSimScene extends Phaser.Scene {
         return;
       }
 
-      const sprite = this.add.image(object.x, object.y, textureKey);
+      const override = LAYOUT_OBJECT_POSITION_OVERRIDES[object.type];
+      const renderX = object.x + (override?.x ?? 0);
+      const renderY = object.y + (override?.y ?? 0);
+
+      const sprite = this.add.image(renderX, renderY, textureKey);
       const opaque = this.getLayoutTextureOpaqueBounds(textureKey);
       if (opaque) {
         const frame = this.textures.get(textureKey).get(0);
@@ -625,7 +636,7 @@ export default class LifeSimScene extends Phaser.Scene {
       }
 
       const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 0;
-      sprite.setDepth(object.y + zIndex * LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER);
+      sprite.setDepth(renderY + zIndex * LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER);
     });
   }
 
