@@ -89,9 +89,9 @@ export const houseRuntimeContract = {
         "foreground": true
       },
       "use_running_machine": {
-        "x": 470.9332827536344,
-        "y": 639.5333404541016,
-        "foreground": false
+        "x": 467.9332829851204,
+        "y": 627.0000305175781,
+        "foreground": true
       },
       "use_kitchen_worktop": {
         "x": 607.9332721824387,
