@@ -14,6 +14,10 @@ const INTERRUPT_PRIORITY_PLAYER = 80;
 const INTERRUPT_PRIORITY_DOOR = 100;
 const MAX_PENDING_PLAYER_REQUESTS = 3;
 const LETTER_REPLY_DELAY_MS = 2_200;
+const QUEUE_FOLLOWUP_DELAY_MS = 1_600;
+const DAILY_REFLECTION_DELAY_MS = 2_400;
+const FAST_COMMAND_WINDOW_MS = 2_600;
+const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -66,12 +70,16 @@ interface PlayerRequestEnvelope {
   intent: TaskType;
   enqueuedAtMs: number;
   resolveAtMs: number;
+  queueDepthAtEnqueue: number;
+  repeatStreak: number;
+  cadencePenalty: number;
 }
 
 interface DelayedNarrativeEvent {
   id: number;
   atMs: number;
-  type: 'letter_reply';
+  type: 'letter_reply' | 'queue_followup' | 'daily_reflection';
+  message?: string;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -142,6 +150,11 @@ export default class LifeSimScene extends Phaser.Scene {
   private commandOutcomes: boolean[] = [];
   private requestSequence = 0;
   private delayedEventSequence = 0;
+  private lastRequestedIntent: TaskType | null = null;
+  private sameIntentStreak = 0;
+  private lastRequestAtMs = 0;
+  private dailyAcceptedCount = 0;
+  private dailyRejectedCount = 0;
   private dayIndex = 1;
   private dayElapsedMs = 0;
   private autoDeliveryTriggered = false;
@@ -283,7 +296,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
-    this.emitLog('system', 'Phase 6.3 enabled: delayed request responses, letter loop, and stronger social simulation.');
+    this.emitLog('system', 'Phase 6.4 enabled: request memory, pacing sensitivity, and daily reflections.');
     this.reportOptionalAnimationFallbacks();
     this.runStartupAudit();
     this.emitProfile();
@@ -292,7 +305,7 @@ export default class LifeSimScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     const deltaMs = Math.min(delta, 50);
 
-    this.advanceDay(deltaMs);
+    this.advanceDay(deltaMs, time);
     this.tickPlayerRequests(time);
     this.tickNarrativeEvents(time);
     this.tickMan(deltaMs, time);
@@ -362,6 +375,29 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('system', `That request is unavailable in this layout. Falling back to ${textForTask(intendedTask)}.`);
     }
 
+    const now = this.time.now;
+    const cadencePenalty = this.getCadencePenalty(now);
+    const repeatStreak = this.trackIntentStreak(intendedTask);
+    this.lastRequestAtMs = now;
+
+    if (this.hasDuplicatePendingRequest(command.normalized, intendedTask, now)) {
+      this.emitLog('man', `${this.identity.name} gestures that this request is already in the queue.`);
+      this.recordCommandOutcome(false);
+      this.identity.mood = onCommandRejected(this.identity.mood);
+      this.emitAudioCue('negative');
+      this.emitProfile();
+      return;
+    }
+
+    if (repeatStreak >= 3 && cadencePenalty >= 0.1) {
+      this.emitLog('man', `${this.identity.name} looks pressured and asks for fewer repeated commands.`);
+      this.recordCommandOutcome(false);
+      this.identity.mood = onCommandRejected(this.identity.mood);
+      this.emitAudioCue('negative');
+      this.emitProfile();
+      return;
+    }
+
     if (this.playerRequests.length >= MAX_PENDING_PLAYER_REQUESTS) {
       this.emitLog('man', `${this.identity.name} seems overloaded and ignores the extra request.`);
       this.recordCommandOutcome(false);
@@ -376,12 +412,18 @@ export default class LifeSimScene extends Phaser.Scene {
       raw: rawInput,
       normalized: command.normalized,
       intent: intendedTask,
-      enqueuedAtMs: this.time.now,
-      resolveAtMs: this.time.now + this.getRequestResponseDelayMs(intendedTask, this.playerRequests.length),
+      enqueuedAtMs: now,
+      resolveAtMs: now + this.getRequestResponseDelayMs(intendedTask, this.playerRequests.length),
+      queueDepthAtEnqueue: this.playerRequests.length,
+      repeatStreak,
+      cadencePenalty,
     };
 
     this.playerRequests.push(envelope);
     this.emitLog('man', `${this.identity.name} is considering your request.`);
+    if (repeatStreak >= 2) {
+      this.emitLog('system', `${this.identity.name} noticed repeated requests for ${textForTask(intendedTask)}.`);
+    }
     if (this.playerRequests.length > 1) {
       this.emitLog('system', `Request queue: ${this.playerRequests.length} pending.`);
     }
@@ -520,7 +562,7 @@ export default class LifeSimScene extends Phaser.Scene {
     });
   }
 
-  private advanceDay(deltaMs: number): void {
+  private advanceDay(deltaMs: number, time: number): void {
     this.dayElapsedMs += deltaMs;
 
     if (!this.autoDeliveryTriggered && this.dayElapsedMs >= DAY_DURATION_MS * 0.55) {
@@ -536,6 +578,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (this.dayElapsedMs >= DAY_DURATION_MS) {
+      const reflection = this.composeDailyReflection();
       this.dayElapsedMs = 0;
       this.dayIndex += 1;
       this.autoDeliveryTriggered = false;
@@ -544,8 +587,21 @@ export default class LifeSimScene extends Phaser.Scene {
       this.interruptedTaskStack = [];
       this.playerRequests = [];
       this.delayedNarrativeEvents = [];
+      this.lastRequestedIntent = null;
+      this.sameIntentStreak = 0;
+      this.lastRequestAtMs = 0;
+      this.dailyAcceptedCount = 0;
+      this.dailyRejectedCount = 0;
       this.emitLog('system', `Day ${this.dayIndex} begins.`);
       this.emitAudioCue('routine_shift');
+      if (reflection) {
+        this.delayedNarrativeEvents.push({
+          id: ++this.delayedEventSequence,
+          atMs: time + DAILY_REFLECTION_DELAY_MS,
+          type: 'daily_reflection',
+          message: reflection,
+        });
+      }
       saveSnapshot({
         version: 1,
         manIdentity: this.identity,
@@ -560,6 +616,39 @@ export default class LifeSimScene extends Phaser.Scene {
     const queueDelayMs = pendingAhead * 900;
     const intentDelayMs = intent === 'type_letter' ? 600 : 0;
     return Math.round(clamp(baseMs + moodDelayMs + queueDelayMs + intentDelayMs, 900, 7_200));
+  }
+
+  private getCadencePenalty(nowMs: number): number {
+    if (this.lastRequestAtMs <= 0) {
+      return 0;
+    }
+
+    const gapMs = nowMs - this.lastRequestAtMs;
+    if (gapMs >= FAST_COMMAND_WINDOW_MS) {
+      return 0;
+    }
+
+    const ratio = (FAST_COMMAND_WINDOW_MS - gapMs) / FAST_COMMAND_WINDOW_MS;
+    return clamp(ratio * 0.22, 0, 0.22);
+  }
+
+  private trackIntentStreak(intent: TaskType): number {
+    if (this.lastRequestedIntent === intent) {
+      this.sameIntentStreak += 1;
+    } else {
+      this.sameIntentStreak = 1;
+    }
+    this.lastRequestedIntent = intent;
+    return this.sameIntentStreak;
+  }
+
+  private hasDuplicatePendingRequest(normalized: string, intent: TaskType, nowMs: number): boolean {
+    return this.playerRequests.some((request) => {
+      if (request.normalized === normalized) {
+        return true;
+      }
+      return request.intent === intent && nowMs - request.enqueuedAtMs <= DUPLICATE_REQUEST_WINDOW_MS;
+    });
   }
 
   private tickPlayerRequests(time: number): void {
@@ -580,7 +669,12 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private resolvePlayerRequest(request: PlayerRequestEnvelope, remainingQueueDepth: number): void {
-    const accepts = this.rollCommandAcceptance(request.intent, remainingQueueDepth);
+    const accepts = this.rollCommandAcceptance(
+      request.intent,
+      remainingQueueDepth + request.queueDepthAtEnqueue,
+      request.repeatStreak,
+      request.cadencePenalty
+    );
     if (!accepts) {
       this.emitLog('man', this.getRequestRejectionLine());
       this.recordCommandOutcome(false);
@@ -600,14 +694,25 @@ export default class LifeSimScene extends Phaser.Scene {
       },
       'player request'
     );
-    this.emitLog('man', this.getRequestAcceptanceLine(request.intent, remainingQueueDepth));
+    this.emitLog('man', this.getRequestAcceptanceLine(request.intent, remainingQueueDepth, request.repeatStreak));
+    if (remainingQueueDepth > 0) {
+      this.delayedNarrativeEvents.push({
+        id: ++this.delayedEventSequence,
+        atMs: this.time.now + QUEUE_FOLLOWUP_DELAY_MS,
+        type: 'queue_followup',
+        message: this.composeQueueFollowupLine(remainingQueueDepth),
+      });
+    }
     this.recordCommandOutcome(true);
     this.identity.mood = onCommandAccepted(this.identity.mood);
     this.emitAudioCue('positive');
     this.emitProfile();
   }
 
-  private getRequestAcceptanceLine(intent: TaskType, remainingQueueDepth: number): string {
+  private getRequestAcceptanceLine(intent: TaskType, remainingQueueDepth: number, repeatStreak: number): string {
+    if (repeatStreak >= 3) {
+      return `I heard you. I will ${textForTask(intent)} once I catch up.`;
+    }
     if (remainingQueueDepth > 0) {
       return `Okay. I will ${textForTask(intent)} after I clear a few things.`;
     }
@@ -639,8 +744,27 @@ export default class LifeSimScene extends Phaser.Scene {
       if (event.type === 'letter_reply') {
         this.emitLog('man', this.composeLetterReply());
         this.emitAudioCue('positive');
+        return;
+      }
+
+      if (event.type === 'queue_followup' && event.message) {
+        this.emitLog('man', event.message);
+        this.emitAudioCue('routine_shift');
+        return;
+      }
+
+      if (event.type === 'daily_reflection' && event.message) {
+        this.emitLog('man', event.message);
+        this.emitAudioCue('positive');
       }
     });
+  }
+
+  private composeQueueFollowupLine(remainingQueueDepth: number): string {
+    if (remainingQueueDepth >= 2) {
+      return `He says, "I still have ${remainingQueueDepth} requests queued. I will work through them."`;
+    }
+    return 'He says, "One more request is still pending. I have not forgotten."';
   }
 
   private composeLetterReply(): string {
@@ -654,6 +778,22 @@ export default class LifeSimScene extends Phaser.Scene {
       return 'He writes: "Message received. I will keep to the routine and report back later."';
     }
     return 'He writes: "I got your note. I will do what I can today."';
+  }
+
+  private composeDailyReflection(): string | null {
+    const total = this.dailyAcceptedCount + this.dailyRejectedCount;
+    if (total === 0) {
+      return null;
+    }
+
+    const acceptRate = this.dailyAcceptedCount / total;
+    if (acceptRate >= 0.72) {
+      return 'He leaves a daily note: "Today went smoothly. Thank you for being patient with me."';
+    }
+    if (acceptRate <= 0.32) {
+      return 'He leaves a daily note: "Today felt crowded. Fewer repeated requests would help tomorrow."';
+    }
+    return 'He leaves a daily note: "Mixed day. I will try to balance my routine and your requests tomorrow."';
   }
 
   private enqueueTask(task: NpcTask, toFront = false): void {
@@ -762,7 +902,12 @@ export default class LifeSimScene extends Phaser.Scene {
     return true;
   }
 
-  private getCommandAcceptanceChance(intent: TaskType, queueDepthPenalty = 0): number {
+  private getCommandAcceptanceChance(
+    intent: TaskType,
+    queueDepthPenalty = 0,
+    repeatStreak = 1,
+    cadencePenalty = 0
+  ): number {
     const acceptCount = this.commandOutcomes.filter(Boolean).length;
     const rejectCount = this.commandOutcomes.length - acceptCount;
 
@@ -774,16 +919,28 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const isPlayfulTask = intent === 'dance' || intent === 'pet_dog';
     const taskBias = isPlayfulTask ? this.identity.personality.playfulness * 0.2 : this.identity.personality.diligence * 0.15;
-    const queuePenalty = Math.min(0.22, queueDepthPenalty * 0.08);
-    return clamp(chance + taskBias - queuePenalty, 0.08, 0.95);
+    const queuePenalty = Math.min(0.28, queueDepthPenalty * 0.08);
+    const repeatPenalty = Math.min(0.26, Math.max(0, repeatStreak - 1) * 0.09);
+    const interactionBonus = this.dailyAcceptedCount > this.dailyRejectedCount ? 0.04 : 0;
+    return clamp(chance + taskBias + interactionBonus - queuePenalty - repeatPenalty - cadencePenalty, 0.06, 0.95);
   }
 
-  private rollCommandAcceptance(intent: TaskType, queueDepthPenalty = 0): boolean {
-    return Math.random() < this.getCommandAcceptanceChance(intent, queueDepthPenalty);
+  private rollCommandAcceptance(
+    intent: TaskType,
+    queueDepthPenalty = 0,
+    repeatStreak = 1,
+    cadencePenalty = 0
+  ): boolean {
+    return Math.random() < this.getCommandAcceptanceChance(intent, queueDepthPenalty, repeatStreak, cadencePenalty);
   }
 
   private recordCommandOutcome(accepted: boolean): void {
     this.commandOutcomes.push(accepted);
+    if (accepted) {
+      this.dailyAcceptedCount += 1;
+    } else {
+      this.dailyRejectedCount += 1;
+    }
     if (this.commandOutcomes.length > 10) {
       this.commandOutcomes.shift();
     }
