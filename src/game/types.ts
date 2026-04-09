@@ -31,8 +31,11 @@ export interface ManIdentity {
 
 export type TaskType =
   | 'idle'
+  | 'idle_stand'
   | 'wander'
   | 'sleep'
+  | 'sit_chair'
+  | 'use_computer'
   | 'use_running_machine'
   | 'play_piano'
   | 'play_another_song'

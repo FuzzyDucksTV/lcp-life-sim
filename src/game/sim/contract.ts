@@ -61,15 +61,23 @@ export function getWorldSizeFromContract(): { width: number; height: number } {
 }
 
 export function resolveTaskTargetCells(grid: NavigationGrid): {
+  chair: CellKey | null;
+  computerDesk: CellKey | null;
   runningMachine: CellKey | null;
   piano: CellKey | null;
   letterDesk: CellKey | null;
   door: CellKey | null;
 } {
+  const chairObject = findObjectByKeywords(['chair']);
+  const computerDeskObject = findObjectByKeywords(['computerdesk']);
   const runningMachineObject = findObjectByKeywords(['runningmachine']);
   const pianoObject = findObjectByKeywords(['piano']);
   const deskObject = findObjectByKeywords(['computerdesk', 'desk']);
 
+  const chairCell = chairObject ? findNearestWalkableCell(grid, objectToCell(chairObject, runtimeContract.gridSize)) : null;
+  const computerDeskCell = computerDeskObject
+    ? findNearestWalkableCell(grid, objectToCell(computerDeskObject, runtimeContract.gridSize))
+    : null;
   const runningMachineCell = runningMachineObject
     ? findNearestWalkableCell(grid, objectToCell(runningMachineObject, runtimeContract.gridSize))
     : null;
@@ -90,6 +98,8 @@ export function resolveTaskTargetCells(grid: NavigationGrid): {
     : null;
 
   return {
+    chair: chairCell,
+    computerDesk: computerDeskCell,
     runningMachine: runningMachineCell,
     piano: pianoCell,
     letterDesk: letterDeskCell,

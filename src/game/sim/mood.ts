@@ -13,8 +13,12 @@ function clamp01(value: number): number {
 
 export function tickMood(mood: MoodState, deltaMs: number, activeTask: TaskType): MoodState {
   const minuteFactor = deltaMs / 60_000;
-  const isRest = activeTask === 'sleep' || activeTask === 'idle';
-  const isWork = activeTask === 'use_running_machine' || activeTask === 'play_piano' || activeTask === 'type_letter';
+  const isRest = activeTask === 'sleep' || activeTask === 'idle' || activeTask === 'idle_stand' || activeTask === 'sit_chair';
+  const isWork =
+    activeTask === 'use_running_machine' ||
+    activeTask === 'play_piano' ||
+    activeTask === 'type_letter' ||
+    activeTask === 'use_computer';
 
   const next: MoodState = {
     energy: mood.energy + (isRest ? 0.016 : -0.009) * minuteFactor,

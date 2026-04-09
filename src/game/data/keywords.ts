@@ -14,7 +14,7 @@ const VOCAB_WORDS = [
   'seem', 'seems', 'serenade', 'should', 'show', 'sloppy', 'sonata', 'song', 'spin', 'start', 'stereo',
   'subtract', 'teeth', 'tell', 'tickle', 'tidy', 'tired', 'troubles', 'try', 'tune', 'turntable', 'tv',
   'type', 'untidy', 'upstairs', 'utilities', 'use', 'water', 'war', 'what', 'whats', 'another', 'running',
-  'machine', 'runningmachine', 'a', 'to', 'me', 'the', 'another', 'song',
+  'machine', 'runningmachine', 'computerdesk', 'desk', 'sit', 'down', 'at', 'a', 'to', 'me', 'the', 'another', 'song',
 ] as const;
 
 export const VOCABULARY = new Set<string>(VOCAB_WORDS);
@@ -41,6 +41,21 @@ function includesAll(tokens: string[], required: string[]): boolean {
 }
 
 export function inferIntent(tokens: string[]): TaskType | null {
+  if (
+    (tokens.includes('sit') && tokens.includes('chair')) ||
+    (tokens.includes('sit') && tokens.includes('down'))
+  ) {
+    return 'sit_chair';
+  }
+
+  if (
+    (tokens.includes('computer') && tokens.includes('use')) ||
+    (tokens.includes('computer') && tokens.includes('logon')) ||
+    tokens.includes('computerdesk')
+  ) {
+    return 'use_computer';
+  }
+
   if (tokens.includes('dance') || tokens.includes('boogie')) {
     return 'dance';
   }

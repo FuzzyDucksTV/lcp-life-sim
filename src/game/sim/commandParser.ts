@@ -3,6 +3,10 @@ import type { SimCommand } from '../types';
 
 function buildFeedback(intent: SimCommand['intent']): string {
   switch (intent) {
+    case 'sit_chair':
+      return 'I can ask him to sit in a chair.';
+    case 'use_computer':
+      return 'I can ask him to use the computer.';
     case 'type_letter':
       return 'I can ask him to type a letter.';
     case 'use_running_machine':

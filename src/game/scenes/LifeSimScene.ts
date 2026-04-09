@@ -23,6 +23,8 @@ interface NpcRuntime {
 }
 
 interface TaskTargets {
+  chair: CellKey | null;
+  computerDesk: CellKey | null;
   runningMachine: CellKey | null;
   piano: CellKey | null;
   letterDesk: CellKey | null;
@@ -41,6 +43,13 @@ interface OcclusionZone {
   width: number;
   height: number;
   mode?: 'hide' | 'show';
+}
+
+interface RoutineBeat {
+  startRatio: number;
+  endRatio: number;
+  label: string;
+  task: TaskType;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -70,6 +79,12 @@ function getDirection(dx: number, dy: number): 'left' | 'right' | 'up' | 'down' 
 
 function textForTask(task: TaskType): string {
   switch (task) {
+    case 'idle_stand':
+      return 'stand for a while';
+    case 'sit_chair':
+      return 'sit in a chair';
+    case 'use_computer':
+      return 'use the computer';
     case 'type_letter':
       return 'type a letter';
     case 'use_running_machine':
@@ -101,7 +116,19 @@ export default class LifeSimScene extends Phaser.Scene {
   private deliveryQueued = false;
   private ringBellCount = 0;
   private lastProfilePushAt = 0;
+  private lastRoutineBeatIndex = -1;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
+
+  private readonly routineBeats: readonly RoutineBeat[] = [
+    { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
+    { startRatio: 0.1, endRatio: 0.23, label: 'morning movement', task: 'use_running_machine' },
+    { startRatio: 0.23, endRatio: 0.38, label: 'desk time', task: 'use_computer' },
+    { startRatio: 0.38, endRatio: 0.52, label: 'letter writing', task: 'type_letter' },
+    { startRatio: 0.52, endRatio: 0.67, label: 'break and music', task: 'play_piano' },
+    { startRatio: 0.67, endRatio: 0.82, label: 'rest in chair', task: 'sit_chair' },
+    { startRatio: 0.82, endRatio: 0.92, label: 'free time', task: 'wander' },
+    { startRatio: 0.92, endRatio: 1.01, label: 'night rest', task: 'sleep' },
+  ];
 
   private readonly animationSpecs: Record<string, AnimationSpec> = {
     manWalkDown: { texture: 'man-walk-down', frameCount: 16, framesPerRow: 4 },
@@ -187,6 +214,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
+    this.emitLog('system', 'Phase 6.1 routine enabled: idle stand, sit chair, and computer use are active.');
     this.emitProfile();
   }
 
@@ -214,12 +242,14 @@ export default class LifeSimScene extends Phaser.Scene {
     this.ringBellCount += 1;
     if (this.deliveryQueued || this.doorPhase !== 'none' || this.man.currentTask.type === 'door_delivery') {
       this.emitLog('system', 'The bell rings, but a delivery is already in progress.');
+      this.emitAudioCue('negative');
       return;
     }
 
     this.deliveryQueued = true;
     this.emitLog('player', 'Please come to the door.');
     this.emitLog('man', `${this.identity.name} heard the bell and will check the door.`);
+    this.emitAudioCue('bell');
     this.enqueueTask({ type: 'door_delivery' }, true);
   }
 
@@ -231,6 +261,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('system', command.feedback);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.recordCommandOutcome(false);
+      this.emitAudioCue('negative');
       this.emitProfile();
       return;
     }
@@ -239,6 +270,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('man', 'He nods politely but does not change his routine.');
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
+      this.emitAudioCue('negative');
       this.emitProfile();
       return;
     }
@@ -248,6 +280,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('man', `${this.identity.name} seems unwilling right now.`);
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
+      this.emitAudioCue('negative');
       this.emitProfile();
       return;
     }
@@ -259,6 +292,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('man', `Okay, I will ${textForTask(command.intent)}.`);
     this.recordCommandOutcome(true);
     this.identity.mood = onCommandAccepted(this.identity.mood);
+    this.emitAudioCue('positive');
     this.emitProfile();
   }
 
@@ -271,6 +305,9 @@ export default class LifeSimScene extends Phaser.Scene {
     this.createLoopAnimation('man-anim-walk-up', 'man-walk-up', 16, 10);
     this.createLoopAnimation('man-anim-walk-left', 'man-walk-left', 16, 10);
     this.createLoopAnimation('man-anim-walk-right', 'man-walk-right', 16, 10);
+    this.createLoopAnimation('man-anim-idle-stand', 'man-walk-down', 16, 4);
+    this.createLoopAnimation('man-anim-sit-chair', 'man-sleep', 16, 5);
+    this.createLoopAnimation('man-anim-use-computer', 'man-use-object', 36, 9);
     this.createLoopAnimation('man-anim-sleep', 'man-sleep', 16, 6);
     this.createLoopAnimation('man-anim-use-object', 'man-use-object', 36, 14);
 
@@ -329,6 +366,10 @@ export default class LifeSimScene extends Phaser.Scene {
     } as CommandLogEntry);
   }
 
+  private emitAudioCue(cue: 'bell' | 'positive' | 'negative' | 'routine_shift' | 'door'): void {
+    this.events.emit('ui-audio-cue', cue);
+  }
+
   private emitProfile(): void {
     this.events.emit('ui-profile', this.identity);
   }
@@ -350,7 +391,9 @@ export default class LifeSimScene extends Phaser.Scene {
       this.dayIndex += 1;
       this.autoDeliveryTriggered = false;
       this.deliveryQueued = false;
+      this.lastRoutineBeatIndex = -1;
       this.emitLog('system', `Day ${this.dayIndex} begins.`);
+      this.emitAudioCue('routine_shift');
       saveSnapshot({
         version: 1,
         manIdentity: this.identity,
@@ -415,7 +458,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length === 0) {
-      this.pickAutonomousTask();
+      this.pickRoutineTask(time);
     }
 
     if (this.man.currentTask.type === 'door_delivery') {
@@ -456,6 +499,7 @@ export default class LifeSimScene extends Phaser.Scene {
         this.man.hiddenUntilMs = time + runtimeContract.doorFlow.outsideDurationMs;
         this.man.sprite.setVisible(false);
         this.emitLog('man', `${this.identity.name} stepped outside for a delivery.`);
+        this.emitAudioCue('door');
       }
       return;
     }
@@ -471,6 +515,17 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private runTask(npc: NpcRuntime, time: number, deltaMs: number): void {
     const task = npc.currentTask.type;
+
+    if (task === 'idle' || task === 'idle_stand') {
+      if (npc.performUntilMs === 0) {
+        npc.performUntilMs = time + this.getTaskDuration(task);
+        npc.sprite.play('man-anim-idle-stand', true);
+      }
+      if (time >= npc.performUntilMs) {
+        this.finishManTask();
+      }
+      return;
+    }
 
     if (task === 'wander') {
       if (!npc.pendingTargetCell) {
@@ -509,6 +564,10 @@ export default class LifeSimScene extends Phaser.Scene {
       npc.performUntilMs = time + this.getTaskDuration(task);
       if (task === 'dance') {
         npc.sprite.play('man-anim-walk-right', true);
+      } else if (task === 'sit_chair') {
+        npc.sprite.play('man-anim-sit-chair', true);
+      } else if (task === 'use_computer') {
+        npc.sprite.play('man-anim-use-computer', true);
       } else if (task === 'use_running_machine' || task === 'play_piano' || task === 'type_letter' || task === 'play_another_song') {
         npc.sprite.play('man-anim-use-object', true);
       }
@@ -525,6 +584,13 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private getTaskDuration(task: TaskType): number {
     switch (task) {
+      case 'idle':
+      case 'idle_stand':
+        return 7_000;
+      case 'sit_chair':
+        return 9_500;
+      case 'use_computer':
+        return 11_000;
       case 'type_letter':
         return 12_000;
       case 'use_running_machine':
@@ -542,6 +608,10 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private getTargetForTask(task: TaskType): CellKey | null {
     switch (task) {
+      case 'sit_chair':
+        return this.taskTargets.chair;
+      case 'use_computer':
+        return this.taskTargets.computerDesk || this.taskTargets.letterDesk;
       case 'use_running_machine':
         return this.taskTargets.runningMachine;
       case 'play_piano':
@@ -641,7 +711,7 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private playManIdle(): void {
-    this.man.sprite.play('man-anim-walk-down', true);
+    this.man.sprite.play('man-anim-idle-stand', true);
     this.pauseCurrentAnimation(this.man.sprite);
   }
 
@@ -658,24 +728,33 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
-  private pickAutonomousTask(): void {
+  private pickRoutineTask(_time: number): void {
     const dayRatio = this.dayElapsedMs / DAY_DURATION_MS;
-    if (dayRatio > 0.86) {
-      this.man.currentTask = { type: 'sleep' };
-      this.man.performUntilMs = 0;
-      return;
+    const beatIndex = this.routineBeats.findIndex((beat) => dayRatio >= beat.startRatio && dayRatio < beat.endRatio);
+    const beat = this.routineBeats[Math.max(0, beatIndex)];
+
+    if (beatIndex !== this.lastRoutineBeatIndex) {
+      this.lastRoutineBeatIndex = beatIndex;
+      this.emitLog('system', `Routine shift: ${beat.label}.`);
+      this.emitAudioCue('routine_shift');
     }
 
-    const choice = weightedChoice<TaskType>([
-      { value: 'wander', weight: 28 },
-      { value: 'use_running_machine', weight: 16 * this.identity.personality.diligence + 4 },
-      { value: 'play_piano', weight: 12 * this.identity.personality.playfulness + 4 },
-      { value: 'dance', weight: 9 * this.identity.personality.playfulness + 2 },
-      { value: 'type_letter', weight: 12 * this.identity.personality.diligence + 3 },
-      { value: 'idle', weight: 15 },
-    ]);
+    let task: TaskType = beat.task;
 
-    this.man.currentTask = { type: choice };
+    if (task === 'play_piano' && this.identity.personality.playfulness > 0.66 && Math.random() < 0.33) {
+      task = 'dance';
+    } else if (task === 'use_computer' && this.identity.personality.diligence > 0.7 && Math.random() < 0.35) {
+      task = 'type_letter';
+    } else if (task === 'wander' && Math.random() < 0.5) {
+      task = weightedChoice<TaskType>([
+        { value: 'idle_stand', weight: 14 },
+        { value: 'wander', weight: 12 },
+        { value: 'sit_chair', weight: 7 },
+        { value: 'play_piano', weight: this.identity.personality.playfulness * 12 + 2 },
+      ]);
+    }
+
+    this.man.currentTask = { type: task };
     this.man.performUntilMs = 0;
   }
 

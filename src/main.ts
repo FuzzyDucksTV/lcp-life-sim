@@ -3,6 +3,7 @@ import './style.css';
 import LifeSimScene from './game/scenes/LifeSimScene';
 import { getWorldSizeFromContract } from './game/sim/contract';
 import { UiBridge } from './game/sim/uiBridge';
+import { AudioDirector, type AudioCue } from './game/sim/audio';
 import type { CommandLogEntry, ManIdentity } from './game/types';
 
 const appRoot = document.querySelector<HTMLDivElement>('#app');
@@ -24,6 +25,7 @@ appRoot.innerHTML = `
       <section class="control-card">
         <h2>Door</h2>
         <button id="ring-bell" type="button" disabled>Ring Bell</button>
+        <button id="audio-toggle" type="button">Audio: ON</button>
         <p class="muted">Door flow is fixed: 3 seconds outside.</p>
       </section>
 
@@ -60,10 +62,11 @@ appRoot.innerHTML = `
 
 const ringBellButton = document.querySelector<HTMLButtonElement>('#ring-bell');
 const sendButton = document.querySelector<HTMLButtonElement>('#send-command');
+const audioButton = document.querySelector<HTMLButtonElement>('#audio-toggle');
 const commandInput = document.querySelector<HTMLInputElement>('#command-input');
 const statusLabel = document.querySelector<HTMLParagraphElement>('#sim-status');
 
-if (!ringBellButton || !sendButton || !commandInput || !statusLabel) {
+if (!ringBellButton || !sendButton || !audioButton || !commandInput || !statusLabel) {
   throw new Error('UI shell is missing required control elements.');
 }
 
@@ -77,21 +80,29 @@ setControlsEnabled(false);
 
 const worldSize = getWorldSizeFromContract();
 const scene = new LifeSimScene();
+const audio = new AudioDirector();
 let sceneReady = false;
 
 const bridge = new UiBridge({
   onRingBell: () => {
+    audio.prime();
     if (!sceneReady) {
       return;
     }
     scene.ringBell();
   },
   onSubmitCommand: (input) => {
+    audio.prime();
     if (!sceneReady) {
       return;
     }
     scene.submitPlayerCommand(input);
   },
+});
+
+audioButton.addEventListener('click', () => {
+  const muted = audio.toggleMuted();
+  audioButton.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
 });
 
 scene.events.on('ui-log', (entry: CommandLogEntry) => {
@@ -100,6 +111,10 @@ scene.events.on('ui-log', (entry: CommandLogEntry) => {
 
 scene.events.on('ui-profile', (identity: ManIdentity) => {
   bridge.renderProfile(identity);
+});
+
+scene.events.on('ui-audio-cue', (cue: AudioCue) => {
+  audio.playCue(cue);
 });
 
 scene.events.once(Phaser.Scenes.Events.CREATE, () => {

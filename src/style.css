@@ -170,6 +170,11 @@ button:disabled {
   background: linear-gradient(180deg, #6e5020, #4a3513);
 }
 
+#audio-toggle {
+  margin-top: 8px;
+  width: 100%;
+}
+
 input {
   min-width: 0;
   padding: 9px 10px;
