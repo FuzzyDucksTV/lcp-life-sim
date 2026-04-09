@@ -1390,6 +1390,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private runTask(npc: NpcRuntime, time: number, deltaMs: number): void {
     const task = npc.currentTask.type;
+    const actionAnchorForTask = this.getActionAnchorPointForTask(task);
 
     if (task === 'idle' || task === 'idle_stand') {
       if (npc.performUntilMs === 0) {
@@ -1454,6 +1455,21 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (npc.performUntilMs > 0 && actionAnchorForTask) {
+      // While anchored interactions are performing, lock to the anchor so movement checks do not
+      // force idle/walk animations over the active interaction clip.
+      npc.path = [];
+      npc.pendingTargetCell = null;
+      npc.sprite.setPosition(actionAnchorForTask.x, this.toRenderY(actionAnchorForTask.y, npc.id));
+
+      if (time >= npc.performUntilMs) {
+        this.finishManTask(npc.currentTask, time);
+      } else {
+        npc.sprite.anims.timeScale = 1 + deltaMs * 0.0001;
+      }
+      return;
+    }
+
     const target = this.getTargetForTask(task);
     if (!target) {
       this.finishManTask();
@@ -1467,9 +1483,8 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (npc.performUntilMs === 0) {
       npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
-      const actionAnchor = this.getActionAnchorPointForTask(task);
-      if (actionAnchor) {
-        npc.sprite.setPosition(actionAnchor.x, this.toRenderY(actionAnchor.y, npc.id));
+      if (actionAnchorForTask) {
+        npc.sprite.setPosition(actionAnchorForTask.x, this.toRenderY(actionAnchorForTask.y, npc.id));
       }
       if (task === 'dance') {
         this.applyNpcScaleForTexture(npc, 'man-walk-right');
