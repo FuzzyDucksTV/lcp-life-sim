@@ -535,26 +535,7 @@ export const houseRuntimeContract = {
   },
   "occlusion": {
     "mode": "binary",
-    "zones": [
-      {
-        "id": "occlusion_zone_1775725875282_1",
-        "name": "Occlusion",
-        "x": 512,
-        "y": 224,
-        "width": 128,
-        "height": 96,
-        "mode": "hide"
-      },
-      {
-        "id": "occlusion_zone_1775725885281_2",
-        "name": "Occlusion",
-        "x": 608,
-        "y": 192,
-        "width": 32,
-        "height": 32,
-        "mode": "hide"
-      }
-    ]
+    "zones": []
   },
   "doorFlow": {
     "enabled": true,

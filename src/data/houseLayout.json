@@ -234,6 +234,17 @@
       "movementOverride": "auto"
     },
     {
+      "id": "cooker_3x4_idle_1775641788088_10",
+      "type": "cooker_3x4_idle",
+      "x": 256,
+      "y": 1024,
+      "scale": 0.5,
+      "rotation": 0,
+      "zIndex": -1,
+      "assetId": "asset_cooker_3x4_idle",
+      "movementOverride": "auto"
+    },
+    {
       "id": "kitchenworktop_2_75x2_5_idle_1775656906318_66",
       "type": "kitchenworktop_2_75x2_5_idle",
       "x": 608,
@@ -245,14 +256,25 @@
       "movementOverride": "auto"
     },
     {
-      "id": "cooker_3x4_idle_1775641788088_10",
-      "type": "cooker_3x4_idle",
+      "id": "washingmachine_3x4_idle_1775642382702_30",
+      "type": "washingmachine_3x4_idle",
+      "x": 64,
+      "y": 1024,
+      "scale": 0.5,
+      "rotation": 0,
+      "zIndex": -1,
+      "assetId": "asset_washingmachine_3x4_idle",
+      "movementOverride": "auto"
+    },
+    {
+      "id": "cooker_3x4_cooking_1775642575958_36",
+      "type": "cooker_3x4_cooking",
       "x": 256,
       "y": 1024,
       "scale": 0.5,
       "rotation": 0,
       "zIndex": 0,
-      "assetId": "asset_cooker_3x4_idle",
+      "assetId": "asset_cooker_3x4_cooking",
       "movementOverride": "auto"
     },
     {
@@ -322,35 +344,13 @@
       "movementOverride": "auto"
     },
     {
-      "id": "washingmachine_3x4_idle_1775642382702_30",
-      "type": "washingmachine_3x4_idle",
-      "x": 64,
-      "y": 1024,
-      "scale": 0.5,
-      "rotation": 0,
-      "zIndex": 0,
-      "assetId": "asset_washingmachine_3x4_idle",
-      "movementOverride": "auto"
-    },
-    {
-      "id": "cooker_3x4_cooking_1775642575958_36",
-      "type": "cooker_3x4_cooking",
-      "x": 256,
-      "y": 1024,
-      "scale": 0.5,
-      "rotation": 0,
-      "zIndex": 1,
-      "assetId": "asset_cooker_3x4_cooking",
-      "movementOverride": "auto"
-    },
-    {
       "id": "washingmachine_3x4_full_1775642656270_40",
       "type": "washingmachine_3x4_full",
       "x": 64,
       "y": 1024,
       "scale": 0.5,
       "rotation": 0,
-      "zIndex": 1,
+      "zIndex": 0,
       "assetId": "asset_washingmachine_3x4_full",
       "movementOverride": "auto"
     }
@@ -689,26 +689,7 @@
         "height": 160
       }
     ],
-    "occlusion_zones": [
-      {
-        "id": "occlusion_zone_1775725875282_1",
-        "type": "occlusion",
-        "name": "Occlusion",
-        "x": 512,
-        "y": 224,
-        "width": 128,
-        "height": 96
-      },
-      {
-        "id": "occlusion_zone_1775725885281_2",
-        "type": "occlusion",
-        "name": "Occlusion",
-        "x": 608,
-        "y": 192,
-        "width": 32,
-        "height": 32
-      }
-    ],
+    "occlusion_zones": [],
     "spawn_points": {
       "man": {
         "x": 487.9332814418802,
