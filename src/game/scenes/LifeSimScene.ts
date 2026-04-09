@@ -1660,6 +1660,18 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (task === 'dance') {
+      if (npc.performUntilMs === 0) {
+        npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-dance', 'man-use-object'));
+        npc.sprite.play('man-anim-dance', true);
+      }
+      if (time >= npc.performUntilMs) {
+        this.finishManTask(npc.currentTask, time);
+      }
+      return;
+    }
+
     if (npc.performUntilMs > 0 && actionAnchorForTask) {
       // While anchored interactions are performing, lock to the anchor so movement checks do not
       // force idle/walk animations over the active interaction clip.
@@ -1691,10 +1703,7 @@ export default class LifeSimScene extends Phaser.Scene {
       if (actionAnchorForTask) {
         npc.sprite.setPosition(actionAnchorForTask.x, this.toRenderY(actionAnchorForTask.y, npc.id));
       }
-      if (task === 'dance') {
-        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-dance', 'man-use-object'));
-        npc.sprite.play('man-anim-dance', true);
-      } else if (task === 'sit_chair' || task === 'sit_sofa') {
+      if (task === 'sit_chair' || task === 'sit_sofa') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
         npc.sprite.play('man-anim-sit-chair', true);
       } else if (task === 'sit_settee') {
