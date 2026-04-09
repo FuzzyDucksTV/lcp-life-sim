@@ -261,6 +261,8 @@ function textForTask(task: TaskType): string {
       return 'play another song';
     case 'dance':
       return 'dance';
+    case 'eating_food':
+      return 'eat some food';
     case 'door_delivery':
       return 'check the door';
     default:
@@ -389,6 +391,38 @@ export default class LifeSimScene extends Phaser.Scene {
     },
     { animationKey: 'man-anim-use-object', texture: 'man-use-object', frameCount: 36, framesPerRow: 6, frameRate: 14 },
     {
+      animationKey: 'man-anim-eating-food',
+      texture: 'man-eating-food',
+      fallbackTexture: 'man-use-object',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 6,
+    },
+    {
+      animationKey: 'man-anim-in-shower',
+      texture: 'man-in-shower',
+      fallbackTexture: 'man-use-object',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 6,
+    },
+    {
+      animationKey: 'man-anim-on-toilet',
+      texture: 'man-on-toilet',
+      fallbackTexture: 'man-use-object',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 6,
+    },
+    {
+      animationKey: 'man-anim-sitting-settee',
+      texture: 'man-sitting-settee',
+      fallbackTexture: 'man-sit-chair',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 5,
+    },
+    {
       animationKey: 'dog-anim-idle',
       texture: 'dog-idle',
       fallbackTexture: 'dog-walk-down',
@@ -425,6 +459,10 @@ export default class LifeSimScene extends Phaser.Scene {
         'man-dance',
         'man-knock',
         'man-running-machine',
+        'man-eating-food',
+        'man-in-shower',
+        'man-on-toilet',
+        'man-sitting-settee',
         'dog-idle',
         'dog-sleep',
       ]);
@@ -455,6 +493,10 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-dance', '/sprites/dancing-36frames.png');
     this.load.image('man-knock', '/sprites/knocking-on-the-screen-36frames.png');
     this.load.image('man-running-machine', '/sprites/running-runningmachine-36frames.png');
+    this.load.image('man-eating-food', '/sprites/man-eatingfood.png');
+    this.load.image('man-in-shower', '/sprites/man-inshower.png');
+    this.load.image('man-on-toilet', '/sprites/man-ontoilet.png');
+    this.load.image('man-sitting-settee', '/sprites/man-sitting-settee.png');
     // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
     this.load.image('man-use-computer', '/sprites/man-use-computer.png');
@@ -808,6 +850,10 @@ export default class LifeSimScene extends Phaser.Scene {
       { key: 'man-dance', label: 'dance', fallback: 'man-use-object' },
       { key: 'man-knock', label: 'knock for attention', fallback: 'man-use-object' },
       { key: 'man-running-machine', label: 'running machine', fallback: 'man-use-object' },
+      { key: 'man-eating-food', label: 'eating food', fallback: 'man-use-object' },
+      { key: 'man-in-shower', label: 'in shower', fallback: 'man-use-object' },
+      { key: 'man-on-toilet', label: 'on toilet', fallback: 'man-use-object' },
+      { key: 'man-sitting-settee', label: 'sitting settee', fallback: 'man-sit-chair' },
       { key: 'dog-idle', label: 'dog idle', fallback: 'dog-walk-down' },
       { key: 'dog-sleep', label: 'dog sleep', fallback: 'dog-walk-down' },
     ];
@@ -1561,9 +1607,12 @@ export default class LifeSimScene extends Phaser.Scene {
       if (task === 'dance') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-dance', 'man-use-object'));
         npc.sprite.play('man-anim-dance', true);
-      } else if (task === 'sit_chair' || task === 'sit_sofa' || task === 'sit_settee') {
+      } else if (task === 'sit_chair' || task === 'sit_sofa') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
         npc.sprite.play('man-anim-sit-chair', true);
+      } else if (task === 'sit_settee') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sitting-settee', 'man-sit-chair'));
+        npc.sprite.play('man-anim-sitting-settee', true);
       } else if (
         task === 'use_computer' ||
         task === 'play_piano' ||
@@ -1580,9 +1629,16 @@ export default class LifeSimScene extends Phaser.Scene {
       } else if (task === 'use_running_machine') {
         this.applyNpcScaleForTexture(npc, this.resolveTexture('man-running-machine', 'man-use-object'));
         npc.sprite.play('man-anim-running-machine', true);
+      } else if (task === 'take_shower') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-in-shower', 'man-use-object'));
+        npc.sprite.play('man-anim-in-shower', true);
+      } else if (task === 'use_toilet') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-on-toilet', 'man-use-object'));
+        npc.sprite.play('man-anim-on-toilet', true);
+      } else if (task === 'eating_food') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-eating-food', 'man-use-object'));
+        npc.sprite.play('man-anim-eating-food', true);
       } else if (
-        task === 'take_shower' ||
-        task === 'use_toilet' ||
         task === 'use_fridge' ||
         task === 'use_kitchen_sink' ||
         task === 'use_washing_machine' ||
@@ -1659,6 +1715,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return between(35_000, 120_000);
       case 'dance':
         return between(20_000, 45_000);
+      case 'eating_food':
+        return between(10_000, 20_000);
       default:
         return between(20_000, 35_000);
     }
@@ -1708,6 +1766,8 @@ export default class LifeSimScene extends Phaser.Scene {
         return this.getActionAnchorTargetCell(task) || this.taskTargets.piano;
       case 'type_letter':
         return this.getActionAnchorTargetCell(task) || this.taskTargets.letterDesk;
+      case 'eating_food':
+        return this.getActionAnchorTargetCell('use_cooker');
       default:
         return null;
     }
@@ -1761,6 +1821,7 @@ export default class LifeSimScene extends Phaser.Scene {
       task === 'play_piano' ||
       task === 'play_another_song' ||
       task === 'type_letter' ||
+      task === 'eating_food' ||
       task === 'door_delivery'
     );
   }
@@ -1814,6 +1875,22 @@ export default class LifeSimScene extends Phaser.Scene {
         atMs: completedAtMs + LETTER_REPLY_DELAY_MS,
         type: 'letter_reply',
       });
+    }
+
+    if (task.type === 'use_cooker') {
+      this.emitLog('man', `${this.identity.name} finished cooking and sits down to eat.`);
+      this.enqueueTask(
+        { type: 'eating_food', source: 'system', priority: 50, resumable: false },
+        true
+      );
+    }
+
+    if (task.type === 'eating_food') {
+      this.emitLog('man', `${this.identity.name} finished eating and goes to wash up.`);
+      this.enqueueTask(
+        { type: 'use_dishwasher', source: 'system', priority: 50, resumable: false, remainingMs: 10_000 },
+        true
+      );
     }
   }
 
@@ -1963,9 +2040,15 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
-    if (task === 'sit_chair' || task === 'sit_sofa' || task === 'sit_settee') {
+    if (task === 'sit_chair' || task === 'sit_sofa') {
       this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
       this.man.sprite.play('man-anim-sit-chair', true);
+      return;
+    }
+
+    if (task === 'sit_settee') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sitting-settee', 'man-sit-chair'));
+      this.man.sprite.play('man-anim-sitting-settee', true);
       return;
     }
 
@@ -2000,9 +2083,25 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (task === 'take_shower') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-in-shower', 'man-use-object'));
+      this.man.sprite.play('man-anim-in-shower', true);
+      return;
+    }
+
+    if (task === 'use_toilet') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-on-toilet', 'man-use-object'));
+      this.man.sprite.play('man-anim-on-toilet', true);
+      return;
+    }
+
+    if (task === 'eating_food') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-eating-food', 'man-use-object'));
+      this.man.sprite.play('man-anim-eating-food', true);
+      return;
+    }
+
     if (
-      task === 'take_shower' ||
-      task === 'use_toilet' ||
       task === 'use_fridge' ||
       task === 'use_kitchen_sink' ||
       task === 'use_washing_machine' ||
