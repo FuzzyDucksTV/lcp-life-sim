@@ -1136,7 +1136,7 @@ export default class LifeSimScene extends Phaser.Scene {
     if (task === 'idle' || task === 'idle_stand') {
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
-        npc.sprite.play('man-anim-idle-stand', true);
+        this.playNpcIdle(npc);
       }
       if (time >= npc.performUntilMs) {
         this.finishManTask(npc.currentTask, time);
@@ -1377,7 +1377,11 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (npc.path.length === 0) {
-      return this.isNpcAtCell(npc, targetCell);
+      const atTarget = this.isNpcAtCell(npc, targetCell);
+      if (!atTarget) {
+        this.playNpcIdle(npc);
+      }
+      return atTarget;
     }
 
     const nextCell = npc.path[0];
