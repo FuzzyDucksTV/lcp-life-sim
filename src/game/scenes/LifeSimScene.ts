@@ -59,6 +59,18 @@ const DOG_EAT_CHANCE = 0.08;
 const WASHING_COLLECT_DELAY_MIN_MS = 300_000;
 const WASHING_COLLECT_DELAY_MAX_MS = 600_000;
 const FORGET_CHANCE = 0.35;
+const MAN_HUNGER_RATE_PER_MIN = 0.012;
+const DOG_HUNGER_RATE_PER_MIN = 0.008;
+const MAN_HUNGER_COOK_THRESHOLD = 0.55;
+const MAN_HUNGER_SICK_THRESHOLD = 0.85;
+const DOG_HUNGER_EAT_THRESHOLD = 0.5;
+const FOOD_PER_DELIVERY = 5;
+const DOG_FOOD_PER_DELIVERY = 3;
+const FOOD_PER_MEAL = 1;
+const DOG_FOOD_PER_MEAL = 1;
+const INITIAL_FOOD_SUPPLY = 4;
+const INITIAL_DOG_FOOD_SUPPLY = 3;
+const IRRITATION_AUTO_RELIEF_THRESHOLD = 0.4;
 
 const INTERACTIVE_OBJECT_TYPES: ReadonlyMap<string, { task: TaskType; hideOnStart: boolean }> = new Map([
   ['cooker_3x4_cooking', { task: 'use_cooker', hideOnStart: false }],
@@ -336,6 +348,13 @@ export default class LifeSimScene extends Phaser.Scene {
   private missingLayoutTextureKeys = new Set<string>();
   private interactiveObjectSprites = new Map<string, Phaser.GameObjects.Image>();
   private washingCollectDueAtMs = 0;
+  private manHunger = 0;
+  private dogHunger = 0;
+  private foodSupply = INITIAL_FOOD_SUPPLY;
+  private dogFoodSupply = INITIAL_DOG_FOOD_SUPPLY;
+  private manIsSick = false;
+  private hungerCookingQueued = false;
+  private irritationReliefQueued = false;
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -637,6 +656,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickDog(deltaMs, time);
     this.tickAttentionSeeking(time);
     this.tickWashingCollect(time);
+    this.tickHunger(deltaMs, time);
+    this.tickIrritationRelief(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -1093,7 +1114,9 @@ export default class LifeSimScene extends Phaser.Scene {
       this.lastRequestAtMs = 0;
       this.dailyAcceptedCount = 0;
       this.dailyRejectedCount = 0;
-      this.emitLog('system', `Day ${this.dayIndex} begins.`);
+      this.hungerCookingQueued = false;
+      this.irritationReliefQueued = false;
+      this.emitLog('system', `Day ${this.dayIndex} begins. Food: ${this.foodSupply}, Dog food: ${this.dogFoodSupply}`);
       this.emitAudioCue('routine_shift');
       if (reflection) {
         this.delayedNarrativeEvents.push({
@@ -1558,6 +1581,11 @@ export default class LifeSimScene extends Phaser.Scene {
 
     // Redirect standalone use_cooker to full cooking chain starting from fridge
     if (task === 'use_cooker' && npc.currentTask.fromPlayerCommand !== 'cooking_chain' && npc.performUntilMs === 0) {
+      if (this.foodSupply <= 0) {
+        this.emitLog('man', `${this.identity.name} wants to cook but there is no food!`);
+        this.finishManTask();
+        return;
+      }
       npc.currentTask = { type: 'use_fridge', source: npc.currentTask.source, priority: npc.currentTask.priority ?? 50, resumable: false, fromPlayerCommand: 'cooking_chain' };
       npc.pendingTargetCell = null;
       npc.path = [];
@@ -1744,7 +1772,7 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'lay_bed':
         return between(35_000, 90_000);
       case 'use_computer':
-        return between(30_000, 120_000);
+        return 60_000;
       case 'type_letter':
         return between(30_000, 95_000);
       case 'use_running_machine':
@@ -1754,19 +1782,19 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'use_toilet':
         return between(20_000, 35_000);
       case 'use_fridge':
-        return between(20_000, 32_000);
+        return 10_000;
       case 'use_kitchen_sink':
         return between(20_000, 40_000);
       case 'use_washing_machine':
-        return between(20_000, 45_000);
+        return 10_000;
       case 'use_dishwasher':
-        return between(20_000, 42_000);
+        return 10_000;
       case 'open_kitchen_cupboard':
         return between(20_000, 36_000);
       case 'use_bookcase':
         return between(20_000, 45_000);
       case 'use_kitchen_worktop':
-        return between(20_000, 50_000);
+        return 10_000;
       case 'use_cooker':
         return between(20_000, 55_000);
       case 'use_wardrobe':
@@ -1979,7 +2007,14 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (task.type === 'eating_food') {
-      this.emitLog('man', `${this.identity.name} finished eating and goes to wash up.`);
+      this.foodSupply = Math.max(0, this.foodSupply - FOOD_PER_MEAL);
+      this.manHunger = Math.max(0, this.manHunger - 0.6);
+      this.hungerCookingQueued = false;
+      if (this.manIsSick) {
+        this.manIsSick = false;
+        this.emitLog('system', `${this.identity.name} feels much better after eating.`);
+      }
+      this.emitLog('man', `${this.identity.name} finished eating and goes to wash up. (Food: ${this.foodSupply})`);
       this.enqueueTask(
         { type: 'use_dishwasher', source: 'system', priority: 50, resumable: false, remainingMs: 10_000 },
         true
@@ -2000,6 +2035,9 @@ export default class LifeSimScene extends Phaser.Scene {
 
     // Post-delivery chain: door → cupboard or fridge
     if (task.type === 'door_delivery') {
+      this.foodSupply += FOOD_PER_DELIVERY;
+      this.dogFoodSupply += DOG_FOOD_PER_DELIVERY;
+      this.emitLog('system', `Delivery received! Food: ${this.foodSupply}, Dog food: ${this.dogFoodSupply}`);
       const goToFridge = Math.random() < 0.5;
       if (goToFridge) {
         this.emitLog('man', `${this.identity.name} takes the delivery to the fridge.`);
@@ -2324,6 +2362,88 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('system', `${this.identity.name} remembers the washing is done.`);
     this.enqueueTask(
       { type: 'collect_washing', source: 'system', priority: 45, resumable: true },
+      true
+    );
+  }
+
+  private tickHunger(deltaMs: number, _time: number): void {
+    const minuteFactor = deltaMs / 60_000;
+
+    // Man hunger increases over time
+    this.manHunger = Math.min(1, this.manHunger + MAN_HUNGER_RATE_PER_MIN * minuteFactor);
+
+    // Dog hunger increases over time
+    this.dogHunger = Math.min(1, this.dogHunger + DOG_HUNGER_RATE_PER_MIN * minuteFactor);
+
+    // Man becomes sick when hunger is too high
+    if (this.manHunger >= MAN_HUNGER_SICK_THRESHOLD && !this.manIsSick) {
+      this.manIsSick = true;
+      this.emitLog('system', `${this.identity.name} is feeling sick from hunger!`);
+    }
+
+    // Man auto-cooks when hungry and food is available
+    if (
+      this.manHunger >= MAN_HUNGER_COOK_THRESHOLD &&
+      !this.hungerCookingQueued &&
+      this.foodSupply > 0 &&
+      this.man.currentTask.type !== 'eating_food' &&
+      this.man.currentTask.type !== 'use_cooker' &&
+      this.man.currentTask.type !== 'use_kitchen_worktop' &&
+      this.man.currentTask.fromPlayerCommand !== 'cooking_chain'
+    ) {
+      this.hungerCookingQueued = true;
+      this.emitLog('system', `${this.identity.name} is getting hungry and decides to cook.`);
+      this.enqueueTask(
+        { type: 'use_fridge', source: 'system', priority: 60, resumable: false, fromPlayerCommand: 'cooking_chain' },
+        true
+      );
+    }
+
+    // Dog auto-eats when hungry and dog food is available
+    if (
+      this.dogHunger >= DOG_HUNGER_EAT_THRESHOLD &&
+      this.dogFoodSupply > 0 &&
+      this.dog.performUntilMs === 0 &&
+      this.dog.currentTask.type !== 'sleep'
+    ) {
+      const eatCell = this.getDogAnchorTargetCell('dog_eating');
+      if (eatCell && this.dog.currentTask.type === 'wander') {
+        this.dog.currentTask = { type: 'idle' };
+        this.dog.pendingTargetCell = eatCell;
+      }
+    }
+  }
+
+  private tickIrritationRelief(_time: number): void {
+    if (this.identity.mood.irritation < IRRITATION_AUTO_RELIEF_THRESHOLD) {
+      this.irritationReliefQueued = false;
+      return;
+    }
+
+    if (this.irritationReliefQueued) {
+      return;
+    }
+
+    // Don't interrupt if already doing a relief activity
+    const current = this.man.currentTask.type;
+    if (current === 'play_piano' || current === 'use_computer' || current === 'use_tv') {
+      return;
+    }
+
+    const reliefOptions: TaskType[] = [];
+    if (this.isTaskAvailable('play_piano')) reliefOptions.push('play_piano');
+    if (this.isTaskAvailable('use_computer')) reliefOptions.push('use_computer');
+    if (this.isTaskAvailable('use_tv')) reliefOptions.push('use_tv');
+
+    if (reliefOptions.length === 0) {
+      return;
+    }
+
+    this.irritationReliefQueued = true;
+    const chosen = reliefOptions[Math.floor(Math.random() * reliefOptions.length)];
+    this.emitLog('system', `${this.identity.name} is feeling irritated and decides to ${textForTask(chosen)}.`);
+    this.enqueueTask(
+      { type: chosen, source: 'system', priority: 55, resumable: false },
       true
     );
   }
@@ -2669,7 +2789,7 @@ export default class LifeSimScene extends Phaser.Scene {
       }
 
       // Try to eat at anchor
-      if (roll < DOG_SLEEP_CHANCE + DOG_EAT_CHANCE) {
+      if (roll < DOG_SLEEP_CHANCE + DOG_EAT_CHANCE && this.dogFoodSupply > 0) {
         const eatCell = this.getDogAnchorTargetCell('dog_eating');
         if (eatCell) {
           this.dog.currentTask = { type: 'idle' };
@@ -2680,9 +2800,11 @@ export default class LifeSimScene extends Phaser.Scene {
             if (anchor) {
               this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
             }
+            this.dogFoodSupply = Math.max(0, this.dogFoodSupply - DOG_FOOD_PER_MEAL);
+            this.dogHunger = Math.max(0, this.dogHunger - 0.5);
             this.dog.performUntilMs = time + DOG_EAT_DURATION_MS;
             this.playDogEating();
-            this.emitLog('system', 'The dog eats some food.');
+            this.emitLog('system', `The dog eats some food. (Dog food: ${this.dogFoodSupply})`);
           }
           return;
         }
@@ -2706,6 +2828,12 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (this.dog.currentTask.type === 'idle' && this.dog.pendingTargetCell && this.dog.performUntilMs === 0) {
+      if (this.dogFoodSupply <= 0) {
+        this.dog.currentTask = { type: 'wander' };
+        this.dog.pendingTargetCell = null;
+        this.playDogIdle();
+        return;
+      }
       const eatCell = this.dog.pendingTargetCell;
       const reached = this.moveNpcToCell(this.dog, eatCell, time);
       if (reached) {
@@ -2713,9 +2841,11 @@ export default class LifeSimScene extends Phaser.Scene {
         if (anchor) {
           this.dog.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, 'dog'));
         }
+        this.dogFoodSupply = Math.max(0, this.dogFoodSupply - DOG_FOOD_PER_MEAL);
+        this.dogHunger = Math.max(0, this.dogHunger - 0.5);
         this.dog.performUntilMs = time + DOG_EAT_DURATION_MS;
         this.playDogEating();
-        this.emitLog('system', 'The dog eats some food.');
+        this.emitLog('system', `The dog eats some food. (Dog food: ${this.dogFoodSupply})`);
       }
       return;
     }
