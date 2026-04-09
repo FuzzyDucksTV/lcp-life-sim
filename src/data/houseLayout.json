@@ -179,6 +179,17 @@
       "movementOverride": "auto"
     },
     {
+      "id": "stool_1775766149373_6",
+      "type": "stool",
+      "x": 160,
+      "y": 672,
+      "scale": 1,
+      "rotation": 0,
+      "zIndex": 0,
+      "assetId": "asset_stool",
+      "movementOverride": "auto"
+    },
+    {
       "id": "toilet_4x4_idle_1775657585531_68",
       "type": "toilet_4x4_idle",
       "x": 1120,
@@ -809,8 +820,8 @@
         "foreground": true
       },
       "dog_eating": {
-        "x": 136.93330852574644,
-        "y": 1076.6666717529297,
+        "x": 130.93330898871852,
+        "y": 1068.3333740234375,
         "foreground": true
       },
       "dog_sleeping": {

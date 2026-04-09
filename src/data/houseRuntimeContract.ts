@@ -109,8 +109,8 @@ export const houseRuntimeContract = {
         "foreground": true
       },
       "dog_eating": {
-        "x": 136.93330852574644,
-        "y": 1076.6666717529297,
+        "x": 130.93330898871852,
+        "y": 1068.3333740234375,
         "foreground": true
       },
       "dog_sleeping": {
@@ -586,6 +586,8 @@ export const houseRuntimeContract = {
         "45,19",
         "46,19",
         "47,19",
+        "4,20",
+        "5,20",
         "13,20",
         "14,20",
         "15,20",
