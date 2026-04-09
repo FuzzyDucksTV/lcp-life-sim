@@ -170,6 +170,7 @@ interface LayoutPlacedObject {
 interface ActionAnchorPoint {
   x: number;
   y: number;
+  foreground: boolean;
 }
 
 function layoutObjectTextureKey(type: string): string {
@@ -774,7 +775,9 @@ export default class LifeSimScene extends Phaser.Scene {
           return;
         }
 
-        const point = (source as Record<string, unknown>)[key] as { x?: unknown; y?: unknown } | null;
+        const point = (source as Record<string, unknown>)[key] as
+          | { x?: unknown; y?: unknown; foreground?: unknown }
+          | null;
         if (!point || typeof point !== 'object') {
           return;
         }
@@ -788,6 +791,7 @@ export default class LifeSimScene extends Phaser.Scene {
         anchors[key] = {
           x: useLayoutScale ? x * coordinateScale.x : x,
           y: useLayoutScale ? y * coordinateScale.y : y,
+          foreground: point.foreground !== false,
         };
       });
     };
@@ -2167,14 +2171,17 @@ export default class LifeSimScene extends Phaser.Scene {
     return renderY - this.getRenderYOffset(npcId);
   }
 
-  private isAnchoredInteractionTask(task: TaskType): boolean {
-    return Boolean(this.getActionAnchorPointForTask(task));
+  private isForegroundInteractionTask(task: TaskType): boolean {
+    const actionAnchor = this.getActionAnchorPointForTask(task);
+    return Boolean(actionAnchor && actionAnchor.foreground !== false);
   }
 
   private getManDepth(): number {
     const baseDepth = this.toLogicalY(this.man.sprite.y, 'man');
     const isForegroundInteraction =
-      this.man.performUntilMs > 0 && this.man.path.length === 0 && this.isAnchoredInteractionTask(this.man.currentTask.type);
+      this.man.performUntilMs > 0 &&
+      this.man.path.length === 0 &&
+      this.isForegroundInteractionTask(this.man.currentTask.type);
     return isForegroundInteraction ? baseDepth + MAN_INTERACTION_DEPTH_BOOST : baseDepth;
   }
 
