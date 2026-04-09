@@ -44,8 +44,8 @@ export const houseRuntimeContract = {
         "foreground": true
       },
       "lay_bed": {
-        "x": 1233.9332238790191,
-        "y": 218.86666107177734,
+        "x": 1226.9332244191532,
+        "y": 220.86666107177734,
         "foreground": true
       },
       "take_shower": {
