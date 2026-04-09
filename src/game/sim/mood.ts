@@ -40,10 +40,17 @@ export function tickMood(mood: MoodState, deltaMs: number, activeTask: TaskType)
     activeTask === 'take_shower' ||
     activeTask === 'use_toilet';
   const isSocial = activeTask === 'pet_dog';
+  const isRelief =
+    activeTask === 'play_piano' ||
+    activeTask === 'play_another_song' ||
+    activeTask === 'use_computer' ||
+    activeTask === 'use_tv';
+
+  const irritationDelta = isRelief ? -0.025 : isWork ? 0.006 : isSocial ? -0.012 : -0.004;
 
   const next: MoodState = {
     energy: mood.energy + (isRest ? 0.016 : -0.009) * minuteFactor,
-    irritation: mood.irritation + (isWork ? 0.006 : isSocial ? -0.012 : -0.004) * minuteFactor,
+    irritation: mood.irritation + irritationDelta * minuteFactor,
     focus: mood.focus + (isWork ? 0.009 : isSocial ? 0.002 : -0.002) * minuteFactor,
     warmth: mood.warmth + (isRest ? 0.004 : isSocial ? 0.018 : -0.001) * minuteFactor,
   };
