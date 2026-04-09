@@ -58,6 +58,7 @@ export type TaskType =
   | 'play_another_song'
   | 'dance'
   | 'type_letter'
+  | 'eating_food'
   | 'door_delivery';
 
 export interface NpcTask {
