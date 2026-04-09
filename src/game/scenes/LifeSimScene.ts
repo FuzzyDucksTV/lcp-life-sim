@@ -10,6 +10,8 @@ const DAY_DURATION_MS = 15 * 60 * 1000;
 const PROFILE_REFRESH_INTERVAL_MS = 2_000;
 const MAN_MOVE_SPEED = 74;
 const DOG_MOVE_SPEED = 86;
+const INTERRUPT_PRIORITY_PLAYER = 80;
+const INTERRUPT_PRIORITY_DOOR = 100;
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -59,12 +61,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function weightedChoice<T>(options: Array<{ value: T; weight: number }>): T {
-  const total = options.reduce((sum, option) => sum + option.weight, 0);
-  let target = Math.random() * total;
+function weightedChoiceByRoll<T>(options: Array<{ value: T; weight: number }>, roll: number): T {
+  const total = options.reduce((sum, option) => sum + Math.max(0, option.weight), 0);
+  if (total <= 0) {
+    return options[0].value;
+  }
 
+  let target = clamp(roll, 0, 0.999999) * total;
   for (const option of options) {
-    target -= option.weight;
+    target -= Math.max(0, option.weight);
     if (target <= 0) {
       return option.value;
     }
@@ -82,6 +87,8 @@ function getDirection(dx: number, dy: number): 'left' | 'right' | 'up' | 'down' 
 
 function textForTask(task: TaskType): string {
   switch (task) {
+    case 'pet_dog':
+      return 'pet the dog';
     case 'idle_stand':
       return 'stand for a while';
     case 'sit_chair':
@@ -112,6 +119,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private dog!: NpcRuntime;
   private taskTargets!: TaskTargets;
   private manTaskQueue: NpcTask[] = [];
+  private interruptedTaskStack: NpcTask[] = [];
   private commandOutcomes: boolean[] = [];
   private dayIndex = 1;
   private dayElapsedMs = 0;
@@ -120,6 +128,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private ringBellCount = 0;
   private lastProfilePushAt = 0;
   private lastRoutineBeatIndex = -1;
+  private dogInteractionCooldownUntilMs = 0;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
@@ -230,7 +239,7 @@ export default class LifeSimScene extends Phaser.Scene {
       id: 'man',
       sprite: this.add.sprite(manSpawn.x, manSpawn.y, 'man-walk-down', 0).setScale(manScale),
       path: [],
-      currentTask: { type: 'idle' },
+      currentTask: { type: 'idle', source: 'system', priority: 0, resumable: false },
       performUntilMs: 0,
       moveSpeed: MAN_MOVE_SPEED,
       hiddenUntilMs: 0,
@@ -241,7 +250,7 @@ export default class LifeSimScene extends Phaser.Scene {
       id: 'dog',
       sprite: this.add.sprite(dogSpawn.x, dogSpawn.y, 'dog-walk-down', 0).setScale(dogScale),
       path: [],
-      currentTask: { type: 'wander' },
+      currentTask: { type: 'wander', source: 'system', priority: 0, resumable: false },
       performUntilMs: 0,
       moveSpeed: DOG_MOVE_SPEED,
       hiddenUntilMs: 0,
@@ -253,7 +262,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
-    this.emitLog('system', 'Phase 6.1 routine enabled: idle stand, sit chair, and computer use are active.');
+    this.emitLog('system', 'Phase 6.2 enabled: deterministic routine, interrupt/resume tasks, and dog interaction beats.');
     this.reportOptionalAnimationFallbacks();
     this.runStartupAudit();
     this.emitProfile();
@@ -297,7 +306,10 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('player', 'Please come to the door.');
     this.emitLog('man', `${this.identity.name} heard the bell and will check the door.`);
     this.emitAudioCue('bell');
-    this.enqueueTask({ type: 'door_delivery' }, true);
+    this.requestPriorityTask(
+      { type: 'door_delivery', source: 'system', priority: INTERRUPT_PRIORITY_DOOR, resumable: false },
+      'door delivery'
+    );
   }
 
   public submitPlayerCommand(rawInput: string): void {
@@ -337,10 +349,16 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('system', `That request is unavailable in this layout. Falling back to ${textForTask(intendedTask)}.`);
     }
 
-    this.enqueueTask({
-      type: intendedTask,
-      fromPlayerCommand: command.normalized,
-    });
+    this.requestPriorityTask(
+      {
+        type: intendedTask,
+        fromPlayerCommand: command.normalized,
+        source: 'player',
+        priority: INTERRUPT_PRIORITY_PLAYER,
+        resumable: true,
+      },
+      'player command'
+    );
     this.emitLog('man', `Okay, I will ${textForTask(intendedTask)}.`);
     this.recordCommandOutcome(true);
     this.identity.mood = onCommandAccepted(this.identity.mood);
@@ -489,7 +507,10 @@ export default class LifeSimScene extends Phaser.Scene {
       if (!this.deliveryQueued && this.isTaskAvailable('door_delivery')) {
         this.deliveryQueued = true;
         this.emitLog('system', 'A delivery arrived at the front door.');
-        this.enqueueTask({ type: 'door_delivery' }, true);
+        this.requestPriorityTask(
+          { type: 'door_delivery', source: 'system', priority: INTERRUPT_PRIORITY_DOOR, resumable: false },
+          'scheduled delivery'
+        );
       }
     }
 
@@ -499,6 +520,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.autoDeliveryTriggered = false;
       this.deliveryQueued = false;
       this.lastRoutineBeatIndex = -1;
+      this.interruptedTaskStack = [];
       this.emitLog('system', `Day ${this.dayIndex} begins.`);
       this.emitAudioCue('routine_shift');
       saveSnapshot({
@@ -510,12 +532,109 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private enqueueTask(task: NpcTask, toFront = false): void {
+    const normalized = {
+      ...task,
+      source: task.source || 'system',
+      priority: task.priority ?? 10,
+      resumable: task.resumable ?? true,
+    } satisfies NpcTask;
+
     if (toFront) {
-      this.manTaskQueue.unshift(task);
+      this.manTaskQueue.unshift(normalized);
       return;
     }
 
-    this.manTaskQueue.push(task);
+    const insertIndex = this.manTaskQueue.findIndex((existing) => (existing.priority ?? 0) < (normalized.priority ?? 0));
+    if (insertIndex === -1) {
+      this.manTaskQueue.push(normalized);
+      return;
+    }
+
+    this.manTaskQueue.splice(insertIndex, 0, normalized);
+  }
+
+  private requestPriorityTask(task: NpcTask, reason: string): void {
+    if (this.canInterruptNow(task.priority ?? 0)) {
+      this.pauseCurrentTaskIfResumable(reason);
+      this.enqueueTask(task, true);
+      return;
+    }
+
+    this.enqueueTask(task, true);
+  }
+
+  private canInterruptNow(requestPriority: number): boolean {
+    if (this.man.hiddenUntilMs > 0) {
+      return false;
+    }
+    if (this.doorPhase !== 'none') {
+      return false;
+    }
+
+    const activePriority = this.man.currentTask.priority ?? 0;
+    return requestPriority >= activePriority;
+  }
+
+  private pauseCurrentTaskIfResumable(reason: string): boolean {
+    const current = this.man.currentTask;
+    if (current.type === 'idle' || current.type === 'door_delivery') {
+      return false;
+    }
+
+    if (current.resumable !== false) {
+      const remainingMs = this.estimateRemainingMsForCurrentTask();
+      const resumableTask: NpcTask = {
+        ...current,
+        source: 'resume',
+        priority: 40,
+        remainingMs,
+        resumable: false,
+      };
+      this.interruptedTaskStack.push(resumableTask);
+      this.emitLog('system', `Task paused (${textForTask(current.type)}) due to ${reason}.`);
+    } else {
+      this.emitLog('system', `Task skipped (${textForTask(current.type)}) due to ${reason}.`);
+    }
+
+    this.man.currentTask = { type: 'idle', priority: 0, source: 'system' };
+    this.man.performUntilMs = 0;
+    this.man.pendingTargetCell = null;
+    this.man.path = [];
+    this.playManIdle();
+    return true;
+  }
+
+  private estimateRemainingMsForCurrentTask(): number | undefined {
+    const now = this.time.now;
+    if (this.man.performUntilMs > now) {
+      return Math.max(500, this.man.performUntilMs - now);
+    }
+
+    const task = this.man.currentTask.type;
+    if (task === 'wander' || task === 'door_delivery') {
+      return undefined;
+    }
+
+    return this.getTaskDuration(task);
+  }
+
+  private tryResumeInterruptedTask(): boolean {
+    const next = this.interruptedTaskStack.pop();
+    if (!next) {
+      return false;
+    }
+
+    this.man.currentTask = {
+      ...next,
+      source: 'resume',
+      priority: 40,
+      resumable: false,
+    };
+    this.man.performUntilMs = 0;
+    this.man.pendingTargetCell = next.targetCell ?? null;
+    this.man.path = [];
+    this.emitLog('system', `Resuming previous task: ${textForTask(next.type)}.`);
+    return true;
   }
 
   private rollCommandAcceptance(intent: TaskType): boolean {
@@ -528,7 +647,8 @@ export default class LifeSimScene extends Phaser.Scene {
       ringBellCount: this.ringBellCount,
     });
 
-    const taskBias = intent === 'dance' ? this.identity.personality.playfulness * 0.2 : this.identity.personality.diligence * 0.15;
+    const isPlayfulTask = intent === 'dance' || intent === 'pet_dog';
+    const taskBias = isPlayfulTask ? this.identity.personality.playfulness * 0.2 : this.identity.personality.diligence * 0.15;
     return Math.random() < clamp(chance + taskBias, 0.08, 0.95);
   }
 
@@ -546,7 +666,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('man', `${this.identity.name} came back inside.`);
       this.doorPhase = 'returning';
       this.man.performUntilMs = time + 700;
-      this.man.currentTask = { type: 'door_delivery' };
+      this.man.currentTask = { type: 'door_delivery', source: 'system', priority: INTERRUPT_PRIORITY_DOOR, resumable: false };
     }
 
     if (this.man.hiddenUntilMs > 0) {
@@ -564,7 +684,11 @@ export default class LifeSimScene extends Phaser.Scene {
       this.man.pendingTargetCell = null;
     }
 
-    if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length === 0) {
+    if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length === 0 && this.interruptedTaskStack.length > 0) {
+      this.tryResumeInterruptedTask();
+    }
+
+    if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length === 0 && this.interruptedTaskStack.length === 0) {
       this.pickRoutineTask(time);
     }
 
@@ -625,7 +749,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (task === 'idle' || task === 'idle_stand') {
       if (npc.performUntilMs === 0) {
-        npc.performUntilMs = time + this.getTaskDuration(task);
+        npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
         npc.sprite.play('man-anim-idle-stand', true);
       }
       if (time >= npc.performUntilMs) {
@@ -647,10 +771,38 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (task === 'sleep') {
       if (npc.performUntilMs === 0) {
-        npc.performUntilMs = time + 16_000;
+        npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
         npc.sprite.play('man-anim-sleep', true);
       }
       if (time >= npc.performUntilMs) {
+        this.finishManTask();
+      }
+      return;
+    }
+
+    if (task === 'pet_dog') {
+      const target = this.getTargetForTask(task);
+      if (!target) {
+        this.finishManTask();
+        return;
+      }
+
+      const atTarget = this.moveNpcToCell(npc, target, time);
+      if (!atTarget) {
+        return;
+      }
+
+      if (npc.performUntilMs === 0) {
+        npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
+        npc.sprite.play('man-anim-idle-stand', true);
+        this.pauseCurrentAnimation(npc.sprite);
+        this.dog.path = [];
+        this.playDogIdle();
+        this.emitLog('man', `${this.identity.name} spends a moment with the dog.`);
+      }
+
+      if (time >= npc.performUntilMs) {
+        this.dogInteractionCooldownUntilMs = time + 45_000;
         this.finishManTask();
       }
       return;
@@ -668,7 +820,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (npc.performUntilMs === 0) {
-      npc.performUntilMs = time + this.getTaskDuration(task);
+      npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
       if (task === 'dance') {
         npc.sprite.play('man-anim-walk-right', true);
       } else if (task === 'sit_chair') {
@@ -694,6 +846,8 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'idle':
       case 'idle_stand':
         return 7_000;
+      case 'pet_dog':
+        return 6_500;
       case 'sit_chair':
         return 9_500;
       case 'use_computer':
@@ -713,8 +867,20 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
+  private resolveTaskDuration(task: NpcTask): number {
+    if (task.remainingMs && task.remainingMs > 200) {
+      const duration = task.remainingMs;
+      task.remainingMs = undefined;
+      return duration;
+    }
+
+    return this.getTaskDuration(task.type);
+  }
+
   private getTargetForTask(task: TaskType): CellKey | null {
     switch (task) {
+      case 'pet_dog':
+        return this.getDogInteractionCell();
       case 'sit_chair':
         return this.taskTargets.chair;
       case 'use_computer':
@@ -731,8 +897,32 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
+  private getDogInteractionCell(): CellKey | null {
+    const dogCell = worldToCell({ x: this.dog.sprite.x, y: this.dog.sprite.y }, runtimeContract.gridSize);
+    const [colRaw, rowRaw] = dogCell.split(',');
+    const baseCol = Number(colRaw);
+    const baseRow = Number(rowRaw);
+
+    const candidates: CellKey[] = [
+      `${baseCol - 1},${baseRow}` as CellKey,
+      `${baseCol + 1},${baseRow}` as CellKey,
+      `${baseCol},${baseRow - 1}` as CellKey,
+      `${baseCol},${baseRow + 1}` as CellKey,
+      dogCell,
+    ];
+
+    for (const candidate of candidates) {
+      if (this.grid.walkable.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return findNearestWalkableCell(this.grid, dogCell);
+  }
+
   private taskNeedsTarget(task: TaskType): boolean {
     return (
+      task === 'pet_dog' ||
       task === 'sit_chair' ||
       task === 'use_computer' ||
       task === 'use_running_machine' ||
@@ -758,7 +948,7 @@ export default class LifeSimScene extends Phaser.Scene {
       return task;
     }
 
-    const fallbackTasks: TaskType[] = ['idle_stand', 'wander', 'type_letter', 'play_piano', 'sleep', 'idle'];
+    const fallbackTasks: TaskType[] = ['idle_stand', 'pet_dog', 'wander', 'type_letter', 'play_piano', 'sleep', 'idle'];
     for (const candidate of fallbackTasks) {
       if (this.isTaskAvailable(candidate)) {
         return candidate;
@@ -769,7 +959,7 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private finishManTask(): void {
-    this.man.currentTask = { type: 'idle' };
+    this.man.currentTask = { type: 'idle', source: 'system', priority: 0, resumable: false };
     this.man.performUntilMs = 0;
     this.man.pendingTargetCell = null;
     this.man.path = [];
@@ -872,7 +1062,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
-  private pickRoutineTask(_time: number): void {
+  private pickRoutineTask(time: number): void {
     const dayRatio = this.dayElapsedMs / DAY_DURATION_MS;
     const beatIndex = this.routineBeats.findIndex((beat) => dayRatio >= beat.startRatio && dayRatio < beat.endRatio);
     const beat = this.routineBeats[Math.max(0, beatIndex)];
@@ -885,18 +1075,24 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     let task: TaskType = beat.task;
+    const beatRoll = this.getDeterministicBeatRoll(beatIndex, 1);
 
-    if (task === 'play_piano' && this.identity.personality.playfulness > 0.66 && Math.random() < 0.33) {
+    if (task === 'play_piano' && this.identity.personality.playfulness > 0.66 && beatRoll < 0.33) {
       task = 'dance';
-    } else if (task === 'use_computer' && this.identity.personality.diligence > 0.7 && Math.random() < 0.35) {
+    } else if (task === 'use_computer' && this.identity.personality.diligence > 0.7 && beatRoll < 0.35) {
       task = 'type_letter';
-    } else if (task === 'wander' && Math.random() < 0.5) {
-      task = weightedChoice<TaskType>([
-        { value: 'idle_stand', weight: 14 },
-        { value: 'wander', weight: 12 },
-        { value: 'sit_chair', weight: 7 },
-        { value: 'play_piano', weight: this.identity.personality.playfulness * 12 + 2 },
-      ]);
+    } else if (task === 'wander') {
+      const canPetDog = time >= this.dogInteractionCooldownUntilMs && this.isTaskAvailable('pet_dog');
+      task = weightedChoiceByRoll<TaskType>(
+        [
+          { value: 'idle_stand', weight: 14 },
+          { value: 'wander', weight: 12 },
+          { value: 'sit_chair', weight: 7 },
+          { value: 'play_piano', weight: this.identity.personality.playfulness * 10 + 2 },
+          { value: 'pet_dog', weight: canPetDog ? 8 : 0 },
+        ],
+        this.getDeterministicBeatRoll(beatIndex, 3)
+      );
     }
 
     const resolvedTask = this.resolveTaskWithAvailability(task);
@@ -904,11 +1100,31 @@ export default class LifeSimScene extends Phaser.Scene {
       this.emitLog('system', `Routine fallback: ${textForTask(task)} unavailable, using ${textForTask(resolvedTask)}.`);
     }
 
-    this.man.currentTask = { type: resolvedTask };
+    this.man.currentTask = { type: resolvedTask, source: 'routine', priority: 10, resumable: true };
     this.man.performUntilMs = 0;
   }
 
+  private getDeterministicBeatRoll(beatIndex: number, salt: number): number {
+    const normalizedBeat = Math.max(0, beatIndex);
+    const seed = this.identity.appearanceSeed + this.dayIndex * 101 + normalizedBeat * 37 + salt * 13;
+    const x = Math.sin(seed * 0.0009) * 10000;
+    return x - Math.floor(x);
+  }
+
   private tickDog(_deltaMs: number, time: number): void {
+    if (this.man.currentTask.type === 'pet_dog') {
+      const target = this.getDogCompanionCellNearMan();
+      if (target) {
+        const reached = this.moveNpcToCell(this.dog, target, time);
+        if (reached) {
+          this.playDogIdle();
+        }
+      } else {
+        this.playDogIdle();
+      }
+      return;
+    }
+
     const dayRatio = this.dayElapsedMs / DAY_DURATION_MS;
 
     if (dayRatio > 0.9) {
@@ -977,6 +1193,28 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private pauseCurrentAnimation(sprite: Phaser.GameObjects.Sprite): void {
     sprite.anims.pause(sprite.anims.currentFrame ?? undefined);
+  }
+
+  private getDogCompanionCellNearMan(): CellKey | null {
+    const manCell = worldToCell({ x: this.man.sprite.x, y: this.man.sprite.y }, runtimeContract.gridSize);
+    const [colRaw, rowRaw] = manCell.split(',');
+    const col = Number(colRaw);
+    const row = Number(rowRaw);
+    const candidates: CellKey[] = [
+      `${col + 1},${row}` as CellKey,
+      `${col - 1},${row}` as CellKey,
+      `${col},${row + 1}` as CellKey,
+      `${col},${row - 1}` as CellKey,
+      manCell,
+    ];
+
+    for (const candidate of candidates) {
+      if (this.grid.walkable.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   private applyOcclusionVisibility(npc: NpcRuntime): void {

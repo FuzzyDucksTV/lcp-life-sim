@@ -34,6 +34,7 @@ export type TaskType =
   | 'idle_stand'
   | 'wander'
   | 'sleep'
+  | 'pet_dog'
   | 'sit_chair'
   | 'use_computer'
   | 'use_running_machine'
@@ -48,6 +49,10 @@ export interface NpcTask {
   targetCell?: CellKey;
   dueAtMs?: number;
   fromPlayerCommand?: string;
+  source?: 'routine' | 'player' | 'system' | 'resume';
+  priority?: number;
+  remainingMs?: number;
+  resumable?: boolean;
 }
 
 export interface SimCommand {

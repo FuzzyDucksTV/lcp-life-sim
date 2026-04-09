@@ -19,12 +19,13 @@ export function tickMood(mood: MoodState, deltaMs: number, activeTask: TaskType)
     activeTask === 'play_piano' ||
     activeTask === 'type_letter' ||
     activeTask === 'use_computer';
+  const isSocial = activeTask === 'pet_dog';
 
   const next: MoodState = {
     energy: mood.energy + (isRest ? 0.016 : -0.009) * minuteFactor,
-    irritation: mood.irritation + (isWork ? 0.006 : -0.004) * minuteFactor,
-    focus: mood.focus + (isWork ? 0.009 : -0.002) * minuteFactor,
-    warmth: mood.warmth + (isRest ? 0.004 : -0.001) * minuteFactor,
+    irritation: mood.irritation + (isWork ? 0.006 : isSocial ? -0.012 : -0.004) * minuteFactor,
+    focus: mood.focus + (isWork ? 0.009 : isSocial ? 0.002 : -0.002) * minuteFactor,
+    warmth: mood.warmth + (isRest ? 0.004 : isSocial ? 0.018 : -0.001) * minuteFactor,
   };
 
   return clampMood(next);

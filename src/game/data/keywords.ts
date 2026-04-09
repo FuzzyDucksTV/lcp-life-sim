@@ -41,6 +41,10 @@ function includesAll(tokens: string[], required: string[]): boolean {
 }
 
 export function inferIntent(tokens: string[]): TaskType | null {
+  if (tokens.includes('pet') && (tokens.includes('dog') || tokens.includes('mutt') || tokens.includes('pooch'))) {
+    return 'pet_dog';
+  }
+
   if (
     (tokens.includes('sit') && tokens.includes('chair')) ||
     (tokens.includes('sit') && tokens.includes('down'))
