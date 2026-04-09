@@ -24,8 +24,8 @@ export const houseRuntimeContract = {
     "mode": "bottom_center",
     "actions": {
       "sit_sofa": {
-        "x": 1023.9332400830417,
-        "y": 979.2000122070312,
+        "x": 1036.9332390799354,
+        "y": 990.5333862304688,
         "foreground": true
       },
       "sit_settee": {
@@ -95,7 +95,7 @@ export const houseRuntimeContract = {
       },
       "use_kitchen_worktop": {
         "x": 607.9332721824387,
-        "y": 1017.2000122070312,
+        "y": 998.5333366394043,
         "foreground": true
       },
       "use_cooker": {
@@ -119,8 +119,8 @@ export const houseRuntimeContract = {
         "foreground": true
       },
       "dog_sleeping": {
-        "x": 1179.9332280457677,
-        "y": 991.3333740234375,
+        "x": 1182.9332278142817,
+        "y": 999.8666839599609,
         "foreground": true
       }
     }
