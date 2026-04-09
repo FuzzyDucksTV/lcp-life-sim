@@ -39,6 +39,9 @@ const MAN_RENDER_Y_OFFSET = -54;
 const DOG_RENDER_Y_OFFSET = -20;
 const MAN_DESIRED_HEIGHT_PX = 172;
 const DOG_DESIRED_HEIGHT_PX = 90;
+const MAN_REACTION_ACK_MS = 900;
+const MAN_REACTION_REJECT_MS = 900;
+const MAN_REACTION_BELL_MS = 900;
 const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
@@ -205,6 +208,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private startupExplorationQueued = false;
   private startupExplorationDueAtMs = STARTUP_EXPLORATION_DELAY_MS;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
+  private manReactionUntilMs = 0;
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
   private missingLayoutTextureKeys = new Set<string>();
@@ -235,18 +239,34 @@ export default class LifeSimScene extends Phaser.Scene {
     },
     {
       animationKey: 'man-anim-sit-chair',
-      texture: 'man-sit-chair',
-      fallbackTexture: 'man-sleep',
+      texture: 'man-sit-forward',
+      fallbackTexture: 'man-sit-chair',
       frameCount: 16,
       framesPerRow: 4,
       frameRate: 5,
     },
     {
       animationKey: 'man-anim-use-computer',
-      texture: 'man-use-computer',
-      fallbackTexture: 'man-use-object',
-      frameCount: 36,
-      framesPerRow: 6,
+      texture: 'man-sit-away',
+      fallbackTexture: 'man-use-computer',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 9,
+    },
+    {
+      animationKey: 'man-anim-nod',
+      texture: 'man-nod',
+      fallbackTexture: 'man-idle-stand',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 9,
+    },
+    {
+      animationKey: 'man-anim-shake',
+      texture: 'man-shake',
+      fallbackTexture: 'man-idle-stand',
+      frameCount: 16,
+      framesPerRow: 4,
       frameRate: 9,
     },
     { animationKey: 'man-anim-sleep', texture: 'man-sleep', frameCount: 16, framesPerRow: 4, frameRate: 6 },
@@ -263,7 +283,14 @@ export default class LifeSimScene extends Phaser.Scene {
 
   preload(): void {
     this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
-      if (file.key === 'man-idle-stand' || file.key === 'man-sit-chair' || file.key === 'man-use-computer') {
+      const optionalAnimationKeys = new Set([
+        'man-idle-stand',
+        'man-sit-forward',
+        'man-sit-away',
+        'man-nod',
+        'man-shake',
+      ]);
+      if (optionalAnimationKeys.has(file.key)) {
         this.missingOptionalTextures.add(file.key);
         return;
       }
@@ -281,8 +308,13 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-walk-right', '/sprites/man-walking-right.png');
     this.load.image('man-sleep', '/sprites/man-sleeping.png');
     this.load.image('man-use-object', '/sprites/man-using-object.png');
-    // Optional dedicated clips for Phase 6.1b. If files are missing, runtime fallbacks are used.
-    this.load.image('man-idle-stand', '/sprites/man-idle-stand.png');
+    // Optional dedicated clips. If files are missing, runtime fallbacks are used.
+    this.load.image('man-idle-stand', '/sprites/idleman.png');
+    this.load.image('man-sit-forward', '/sprites/sittingforward.png');
+    this.load.image('man-sit-away', '/sprites/sitting-facing-away.png');
+    this.load.image('man-nod', '/sprites/noddinghead.png');
+    this.load.image('man-shake', '/sprites/shakinghead.png');
+    // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
     this.load.image('man-use-computer', '/sprites/man-use-computer.png');
 
@@ -408,10 +440,19 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('player', 'Please come to the door.');
     this.emitLog('man', `${this.identity.name} heard the bell and will check the door.`);
     this.emitAudioCue('bell');
-    this.requestPriorityTask(
-      { type: 'door_delivery', source: 'system', priority: INTERRUPT_PRIORITY_DOOR, resumable: false },
-      'door delivery'
-    );
+    const reactionPlayed = this.triggerManReaction('nod', MAN_REACTION_BELL_MS);
+    const enqueueDoorTask = (): void => {
+      this.requestPriorityTask(
+        { type: 'door_delivery', source: 'system', priority: INTERRUPT_PRIORITY_DOOR, resumable: false },
+        'door delivery'
+      );
+    };
+
+    if (reactionPlayed) {
+      this.time.delayedCall(MAN_REACTION_BELL_MS, enqueueDoorTask);
+    } else {
+      enqueueDoorTask();
+    }
   }
 
   public submitPlayerCommand(rawInput: string): void {
@@ -423,6 +464,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.recordCommandOutcome(false);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
@@ -432,6 +474,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
@@ -451,6 +494,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
@@ -460,6 +504,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
@@ -469,6 +514,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
@@ -597,8 +643,10 @@ export default class LifeSimScene extends Phaser.Scene {
   private reportOptionalAnimationFallbacks(): void {
     const fallbacks: Array<{ key: string; label: string; fallback: string }> = [
       { key: 'man-idle-stand', label: 'idle stand', fallback: 'man-walk-down' },
-      { key: 'man-sit-chair', label: 'sit chair', fallback: 'man-sleep' },
-      { key: 'man-use-computer', label: 'use computer', fallback: 'man-use-object' },
+      { key: 'man-sit-forward', label: 'sit forward', fallback: 'man-sit-chair' },
+      { key: 'man-sit-away', label: 'sit away', fallback: 'man-use-computer' },
+      { key: 'man-nod', label: 'nod reaction', fallback: 'man-idle-stand' },
+      { key: 'man-shake', label: 'shake reaction', fallback: 'man-idle-stand' },
     ];
 
     fallbacks.forEach((item) => {
@@ -808,20 +856,27 @@ export default class LifeSimScene extends Phaser.Scene {
       this.recordCommandOutcome(false);
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
+      this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
       this.emitProfile();
       return;
     }
 
-    this.requestPriorityTask(
-      {
-        type: request.intent,
-        fromPlayerCommand: request.normalized,
-        source: 'player',
-        priority: INTERRUPT_PRIORITY_PLAYER,
-        resumable: true,
-      },
-      'player request'
-    );
+    const acceptedTask: NpcTask = {
+      type: request.intent,
+      fromPlayerCommand: request.normalized,
+      source: 'player',
+      priority: INTERRUPT_PRIORITY_PLAYER,
+      resumable: true,
+    };
+    const reactionPlayed = this.triggerManReaction('nod', MAN_REACTION_ACK_MS);
+    const enqueueAcceptedTask = (): void => {
+      this.requestPriorityTask(acceptedTask, 'player request');
+    };
+    if (reactionPlayed) {
+      this.time.delayedCall(MAN_REACTION_ACK_MS, enqueueAcceptedTask);
+    } else {
+      enqueueAcceptedTask();
+    }
     this.emitLog('man', this.getRequestAcceptanceLine(request.intent, remainingQueueDepth, request.repeatStreak));
     if (remainingQueueDepth > 0) {
       this.delayedNarrativeEvents.push({
@@ -1088,6 +1143,14 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (this.manReactionUntilMs > 0) {
+      if (time < this.manReactionUntilMs) {
+        return;
+      }
+      this.manReactionUntilMs = 0;
+      this.restoreManAnimationAfterReaction();
+    }
+
     if (this.doorPhase !== 'none') {
       this.handleDoorFlow(time);
       return;
@@ -1247,12 +1310,12 @@ export default class LifeSimScene extends Phaser.Scene {
         this.applyNpcScaleForTexture(npc, 'man-walk-right');
         npc.sprite.play('man-anim-walk-right', true);
       } else if (task === 'sit_chair') {
-        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-chair', 'man-sleep'));
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
         npc.sprite.play('man-anim-sit-chair', true);
-      } else if (task === 'use_computer') {
-        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-use-computer', 'man-use-object'));
+      } else if (task === 'use_computer' || task === 'play_piano' || task === 'type_letter' || task === 'play_another_song') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-away', 'man-use-computer'));
         npc.sprite.play('man-anim-use-computer', true);
-      } else if (task === 'use_running_machine' || task === 'play_piano' || task === 'type_letter' || task === 'play_another_song') {
+      } else if (task === 'use_running_machine') {
         this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
       }
@@ -1518,6 +1581,53 @@ export default class LifeSimScene extends Phaser.Scene {
     this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-idle-stand', 'man-walk-down'));
     this.man.sprite.play('man-anim-idle-stand', true);
     this.pauseCurrentAnimation(this.man.sprite);
+  }
+
+  private triggerManReaction(kind: 'nod' | 'shake', durationMs: number): boolean {
+    if (this.man.hiddenUntilMs > 0 || !this.man.sprite.visible) {
+      return false;
+    }
+
+    if (kind === 'nod') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-nod', 'man-idle-stand'));
+      this.man.sprite.play('man-anim-nod', true);
+    } else {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-shake', 'man-idle-stand'));
+      this.man.sprite.play('man-anim-shake', true);
+    }
+
+    this.manReactionUntilMs = Math.max(this.manReactionUntilMs, this.time.now + Math.max(120, durationMs));
+    return true;
+  }
+
+  private restoreManAnimationAfterReaction(): void {
+    const task = this.man.currentTask.type;
+
+    if (task === 'sleep') {
+      this.applyNpcScaleForTexture(this.man, 'man-sleep');
+      this.man.sprite.play('man-anim-sleep', true);
+      return;
+    }
+
+    if (task === 'sit_chair') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sit-forward', 'man-sit-chair'));
+      this.man.sprite.play('man-anim-sit-chair', true);
+      return;
+    }
+
+    if (task === 'use_computer' || task === 'play_piano' || task === 'play_another_song' || task === 'type_letter') {
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-sit-away', 'man-use-computer'));
+      this.man.sprite.play('man-anim-use-computer', true);
+      return;
+    }
+
+    if (task === 'use_running_machine') {
+      this.applyNpcScaleForTexture(this.man, 'man-use-object');
+      this.man.sprite.play('man-anim-use-object', true);
+      return;
+    }
+
+    this.playManIdle();
   }
 
   private playDogIdle(): void {
