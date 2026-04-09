@@ -1547,7 +1547,7 @@ export default class LifeSimScene extends Phaser.Scene {
       this.playManIdle();
       if (time >= this.man.performUntilMs) {
         this.doorPhase = 'none';
-        this.finishManTask();
+        this.finishManTask(this.man.currentTask, time);
       }
     }
   }
@@ -1567,7 +1567,12 @@ export default class LifeSimScene extends Phaser.Scene {
     if (task === 'idle' || task === 'idle_stand') {
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
-        this.playNpcIdle(npc);
+        if (task === 'idle_stand' && npc.id === 'man') {
+          this.applyNpcScaleForTexture(npc, this.resolveTexture('man-idle-stand', 'man-walk-down'));
+          npc.sprite.play('man-anim-idle-stand', true);
+        } else {
+          this.playNpcIdle(npc);
+        }
       }
       if (time >= npc.performUntilMs) {
         this.finishManTask(npc.currentTask, time);
@@ -1743,7 +1748,7 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'type_letter':
         return between(30_000, 95_000);
       case 'use_running_machine':
-        return between(60_000, 150_000);
+        return between(60_000, 120_000);
       case 'take_shower':
         return between(20_000, 45_000);
       case 'use_toilet':
