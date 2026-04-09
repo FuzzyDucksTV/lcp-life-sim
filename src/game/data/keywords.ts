@@ -17,7 +17,7 @@ const VOCAB_WORDS = [
   'machine', 'runningmachine', 'computerdesk', 'desk', 'sit', 'down', 'at', 'a', 'to', 'me', 'the', 'another', 'song',
   'sofa', 'settee', 'bed', 'sleep', 'lay', 'lie', 'shower', 'bath', 'toilet', 'washing', 'washingmachine',
   'dishwasher', 'washer', 'cupboard', 'bookcase', 'worktop', 'counter', 'cooker', 'wardrobe', 'stove',
-  'cook', 'read', 'turn', 'up', 'machine', 'take', 'lying',
+  'cook', 'read', 'turn', 'up', 'machine', 'take', 'lying', 'prince', 'like',
 ] as const;
 
 export const VOCABULARY = new Set<string>(VOCAB_WORDS);
@@ -48,6 +48,10 @@ function includesAny(tokens: string[], options: string[]): boolean {
 }
 
 export function inferIntent(tokens: string[]): TaskType | null {
+  if (includesAll(tokens, ['sleep', 'like', 'prince'])) {
+    return 'sleep';
+  }
+
   if (tokens.includes('pet') && (tokens.includes('dog') || tokens.includes('mutt') || tokens.includes('pooch'))) {
     return 'pet_dog';
   }
