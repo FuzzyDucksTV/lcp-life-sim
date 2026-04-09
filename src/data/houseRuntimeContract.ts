@@ -29,8 +29,8 @@ export const houseRuntimeContract = {
         "foreground": true
       },
       "sit_settee": {
-        "x": 567.9332752689193,
-        "y": 259.86666107177734,
+        "x": 573.9332748059471,
+        "y": 259.20000076293945,
         "foreground": false
       },
       "sit_computer_desk": {
