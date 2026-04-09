@@ -36,6 +36,8 @@ const DAILY_REFLECTION_DELAY_MS = 2_400;
 const FAST_COMMAND_WINDOW_MS = 2_600;
 const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
 const NPC_RENDER_Y_OFFSET = -20;
+const MAN_DESIRED_HEIGHT_PX = 138;
+const DOG_DESIRED_HEIGHT_PX = 90;
 const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
@@ -327,8 +329,8 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.prepareAllAnimations();
 
-    const manScale = this.getSuggestedScale('man-walk-down', 128);
-    const dogScale = this.getSuggestedScale('dog-walk-down', 90);
+    const manScale = this.getSuggestedScale('man-walk-down', MAN_DESIRED_HEIGHT_PX);
+    const dogScale = this.getSuggestedScale('dog-walk-down', DOG_DESIRED_HEIGHT_PX);
 
     this.man = {
       id: 'man',
@@ -557,11 +559,22 @@ export default class LifeSimScene extends Phaser.Scene {
     });
   }
 
-  private getSuggestedScale(textureKey: string, desiredHeightPx: number): number {
+  private getSuggestedScale(textureKey: string, desiredHeightPx: number, fallbackScale = 1): number {
+    if (!this.textures.exists(textureKey)) {
+      return fallbackScale;
+    }
+
     const texture = this.textures.get(textureKey);
     const frame = texture.get(0);
     const frameHeight = Math.max(1, frame.height);
     return desiredHeightPx / frameHeight;
+  }
+
+  private applyNpcScaleForTexture(npc: NpcRuntime, textureKey: string): void {
+    const desiredHeight = npc.id === 'man' ? MAN_DESIRED_HEIGHT_PX : DOG_DESIRED_HEIGHT_PX;
+    const currentScale = Math.max(0.001, npc.sprite.scaleX || 1);
+    const scale = this.getSuggestedScale(textureKey, desiredHeight, currentScale);
+    npc.sprite.setScale(scale);
   }
 
   private emitLog(source: CommandLogEntry['source'], text: string): void {
@@ -1124,6 +1137,7 @@ export default class LifeSimScene extends Phaser.Scene {
       if (reachedDoor) {
         this.doorPhase = 'opening';
         this.man.performUntilMs = time + 900;
+        this.applyNpcScaleForTexture(this.man, 'man-use-object');
         this.man.sprite.play('man-anim-use-object', true);
       }
       return;
@@ -1177,6 +1191,7 @@ export default class LifeSimScene extends Phaser.Scene {
     if (task === 'sleep') {
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
+        this.applyNpcScaleForTexture(npc, 'man-sleep');
         npc.sprite.play('man-anim-sleep', true);
       }
       if (time >= npc.performUntilMs) {
@@ -1199,6 +1214,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-idle-stand', 'man-walk-down'));
         npc.sprite.play('man-anim-idle-stand', true);
         this.pauseCurrentAnimation(npc.sprite);
         this.dog.path = [];
@@ -1227,12 +1243,16 @@ export default class LifeSimScene extends Phaser.Scene {
     if (npc.performUntilMs === 0) {
       npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
       if (task === 'dance') {
+        this.applyNpcScaleForTexture(npc, 'man-walk-right');
         npc.sprite.play('man-anim-walk-right', true);
       } else if (task === 'sit_chair') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-sit-chair', 'man-sleep'));
         npc.sprite.play('man-anim-sit-chair', true);
       } else if (task === 'use_computer') {
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-use-computer', 'man-use-object'));
         npc.sprite.play('man-anim-use-computer', true);
       } else if (task === 'use_running_machine' || task === 'play_piano' || task === 'type_letter' || task === 'play_another_song') {
+        this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
       }
       return;
@@ -1448,6 +1468,14 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private playWalkAnimation(npc: NpcRuntime, direction: 'left' | 'right' | 'up' | 'down', time: number): void {
     if (npc.id === 'man') {
+      const manTextureKey =
+        direction === 'left'
+          ? 'man-walk-left'
+          : direction === 'right'
+            ? 'man-walk-right'
+            : direction === 'up'
+              ? 'man-walk-up'
+              : 'man-walk-down';
       const key =
         direction === 'left'
           ? 'man-anim-walk-left'
@@ -1456,10 +1484,19 @@ export default class LifeSimScene extends Phaser.Scene {
             : direction === 'up'
               ? 'man-anim-walk-up'
               : 'man-anim-walk-down';
+      this.applyNpcScaleForTexture(npc, manTextureKey);
       npc.sprite.play(key, true);
       return;
     }
 
+    const dogTextureKey =
+      direction === 'left'
+        ? 'dog-walk-left'
+        : direction === 'right'
+          ? 'dog-walk-right'
+          : direction === 'up'
+            ? 'dog-walk-up'
+            : 'dog-walk-down';
     const dogKey =
       direction === 'left'
         ? 'dog-anim-walk-left'
@@ -1468,6 +1505,7 @@ export default class LifeSimScene extends Phaser.Scene {
           : direction === 'up'
             ? 'dog-anim-walk-up'
             : 'dog-anim-walk-down';
+    this.applyNpcScaleForTexture(npc, dogTextureKey);
     npc.sprite.play(dogKey, true);
 
     if (time % 8000 < 16) {
@@ -1476,11 +1514,13 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private playManIdle(): void {
+    this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-idle-stand', 'man-walk-down'));
     this.man.sprite.play('man-anim-idle-stand', true);
     this.pauseCurrentAnimation(this.man.sprite);
   }
 
   private playDogIdle(): void {
+    this.applyNpcScaleForTexture(this.dog, 'dog-walk-down');
     this.dog.sprite.play('dog-anim-walk-down', true);
     this.pauseCurrentAnimation(this.dog.sprite);
   }
@@ -1661,6 +1701,7 @@ export default class LifeSimScene extends Phaser.Scene {
     if (dayRatio > 0.9) {
       this.dog.currentTask = { type: 'sleep' };
       this.dog.path = [];
+      this.applyNpcScaleForTexture(this.dog, 'dog-walk-down');
       this.dog.sprite.play('dog-anim-walk-down', true);
       this.pauseCurrentAnimation(this.dog.sprite);
       return;
