@@ -112,6 +112,7 @@ const TASK_ACTION_ANCHOR_KEYS: Partial<Record<TaskType, readonly ActionAnchorKey
   sit_computer_desk: ['sit_computer_desk'],
   sit_piano: ['sit_piano'],
   lay_bed: ['lay_bed'],
+  sleep: ['lay_bed'],
   take_shower: ['take_shower'],
   use_toilet: ['use_toilet'],
   use_fridge: ['use_fridge'],
