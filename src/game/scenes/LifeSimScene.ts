@@ -648,7 +648,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.applyOcclusionVisibility(this.man);
     this.applyOcclusionVisibility(this.dog);
     this.man.sprite.depth = this.getManDepth();
-    this.dog.sprite.depth = this.toLogicalY(this.dog.sprite.y, 'dog');
+    this.dog.sprite.depth = this.getDogDepth();
   }
 
   public ringBell(): void {
@@ -2339,7 +2339,8 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private playDogSleep(): void {
     const texture = this.resolveTexture('dog-sleep', 'dog-walk-down');
-    this.applyNpcScaleForTexture(this.dog, texture);
+    // Always scale relative to walk sprite so the dog stays a consistent size
+    this.applyNpcScaleForTexture(this.dog, 'dog-walk-down');
     this.dog.sprite.play('dog-anim-sleep', true);
     if (texture === 'dog-walk-down') {
       this.pauseCurrentAnimation(this.dog.sprite);
@@ -2792,6 +2793,19 @@ export default class LifeSimScene extends Phaser.Scene {
   private isForegroundInteractionTask(task: TaskType): boolean {
     const actionAnchor = this.getActionAnchorPointForTask(task);
     return Boolean(actionAnchor && actionAnchor.foreground !== false);
+  }
+
+  private getDogDepth(): number {
+    const baseDepth = this.toLogicalY(this.dog.sprite.y, 'dog');
+    if (this.dog.performUntilMs > 0 && this.dog.path.length === 0) {
+      const anchorKey: ActionAnchorKey | null =
+        this.dog.currentTask.type === 'sleep' ? 'dog_sleeping' : 'dog_eating';
+      const anchor = this.actionAnchors[anchorKey];
+      if (anchor && anchor.foreground) {
+        return baseDepth + MAN_INTERACTION_DEPTH_BOOST;
+      }
+    }
+    return baseDepth;
   }
 
   private getManDepth(): number {
