@@ -1209,12 +1209,14 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    const isSecretSleep = request.intent === 'sleep' && request.normalized.includes('prince');
     const acceptedTask: NpcTask = {
-      type: request.intent,
+      type: isSecretSleep ? 'sleep' : request.intent,
       fromPlayerCommand: request.normalized,
       source: 'player',
       priority: INTERRUPT_PRIORITY_PLAYER,
       resumable: true,
+      ...(isSecretSleep ? { remainingMs: 30_000 } : {}),
     };
     const reactionPlayed = this.triggerManReaction('nod', MAN_REACTION_ACK_MS);
     const enqueueAcceptedTask = (): void => {
