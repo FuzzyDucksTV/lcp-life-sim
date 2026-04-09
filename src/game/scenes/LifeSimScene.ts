@@ -1785,7 +1785,7 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'type_letter':
         return between(30_000, 95_000);
       case 'use_running_machine':
-        return between(60_000, 120_000);
+        return between(30_000, 60_000);
       case 'take_shower':
         return between(20_000, 45_000);
       case 'use_toilet':
@@ -2861,6 +2861,19 @@ export default class LifeSimScene extends Phaser.Scene {
 
     // Default wandering behavior
     if (this.dog.path.length === 0) {
+      // Chance to idle in place before wandering again
+      if (this.dog.performUntilMs === 0 && Math.random() < 0.35) {
+        this.dog.performUntilMs = time + Phaser.Math.Between(8_000, 25_000);
+        this.playDogIdle();
+        return;
+      }
+      if (this.dog.performUntilMs > 0) {
+        if (time < this.dog.performUntilMs) {
+          return;
+        }
+        this.dog.performUntilMs = 0;
+      }
+
       const manCell = worldToCell({ x: this.man.sprite.x, y: this.toLogicalY(this.man.sprite.y, 'man') }, runtimeContract.gridSize);
       const followBias = Math.random() < 0.6;
 
