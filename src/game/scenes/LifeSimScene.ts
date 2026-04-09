@@ -8,7 +8,17 @@ import {
   getWorldSizeFromContract,
   resolveTaskTargetCells,
 } from '../sim/contract';
-import { createNavigationGrid, findNearestWalkableCell, findPathBfs, cellToWorldCenter, pickRandomWalkableCell, worldToCell, type NavigationGrid } from '../sim/navigation';
+import {
+  createNavigationGrid,
+  findNearestWalkableCell,
+  findPathBfs,
+  cellToWorldCenter,
+  parseCellKey,
+  pickRandomWalkableCell,
+  toCellKey,
+  worldToCell,
+  type NavigationGrid,
+} from '../sim/navigation';
 import { loadOrCreateIdentity, loadSnapshot, saveSnapshot } from '../sim/saveState';
 import { getComplianceChance, onCommandAccepted, onCommandRejected, tickMood } from '../sim/mood';
 import type { CellKey, CommandLogEntry, ManIdentity, NpcTask, TaskType } from '../types';
@@ -25,7 +35,9 @@ const QUEUE_FOLLOWUP_DELAY_MS = 1_600;
 const DAILY_REFLECTION_DELAY_MS = 2_400;
 const FAST_COMMAND_WINDOW_MS = 2_600;
 const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
-const NPC_RENDER_Y_OFFSET = -10;
+const NPC_RENDER_Y_OFFSET = -20;
+const STARTUP_EXPLORATION_DELAY_MS = 3_000;
+const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
 
@@ -187,6 +199,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private lastProfilePushAt = 0;
   private lastRoutineBeatIndex = -1;
   private dogInteractionCooldownUntilMs = 0;
+  private startupExplorationQueued = false;
+  private startupExplorationDueAtMs = STARTUP_EXPLORATION_DELAY_MS;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
@@ -340,6 +354,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.playManIdle();
     this.playDogIdle();
+    this.startupExplorationDueAtMs = this.time.now + STARTUP_EXPLORATION_DELAY_MS;
 
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
@@ -1064,6 +1079,10 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    if (!this.startupExplorationQueued && time >= this.startupExplorationDueAtMs) {
+      this.queueStartupExploration();
+    }
+
     if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length > 0) {
       this.man.currentTask = this.manTaskQueue.shift() as NpcTask;
       this.man.performUntilMs = 0;
@@ -1146,7 +1165,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (task === 'wander') {
       if (!npc.pendingTargetCell) {
-        npc.pendingTargetCell = pickRandomWalkableCell(this.grid);
+        npc.pendingTargetCell = npc.currentTask.targetCell || pickRandomWalkableCell(this.grid);
       }
       const done = this.moveNpcToCell(npc, npc.pendingTargetCell, time);
       if (done) {
@@ -1380,6 +1399,8 @@ export default class LifeSimScene extends Phaser.Scene {
       const atTarget = this.isNpcAtCell(npc, targetCell);
       if (!atTarget) {
         this.playNpcIdle(npc);
+        npc.pendingTargetCell = null;
+        return true;
       }
       return atTarget;
     }
@@ -1512,6 +1533,106 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.man.currentTask = { type: resolvedTask, source: 'routine', priority: 10, resumable: true };
     this.man.performUntilMs = 0;
+  }
+
+  private queueStartupExploration(): void {
+    if (this.startupExplorationQueued) {
+      return;
+    }
+
+    this.startupExplorationQueued = true;
+    const route = this.buildStartupExplorationRoute();
+    if (route.length === 0) {
+      this.requestPriorityTask(
+        { type: 'wander', source: 'system', priority: STARTUP_EXPLORATION_PRIORITY, resumable: false },
+        'startup exploration'
+      );
+      return;
+    }
+
+    this.emitLog('system', `${this.identity.name} starts exploring the house.`);
+
+    route.forEach((targetCell, index) => {
+      const task: NpcTask = {
+        type: 'wander',
+        targetCell,
+        source: 'system',
+        priority: STARTUP_EXPLORATION_PRIORITY,
+        resumable: false,
+      };
+
+      if (index === 0) {
+        this.requestPriorityTask(task, 'startup exploration');
+      } else {
+        this.enqueueTask(task);
+      }
+    });
+  }
+
+  private buildStartupExplorationRoute(): CellKey[] {
+    const route: CellKey[] = [];
+    const seen = new Set<CellKey>();
+
+    const addRouteCell = (candidate: CellKey | null): void => {
+      if (!candidate) {
+        return;
+      }
+
+      const resolved = findNearestWalkableCell(this.grid, candidate);
+      if (!resolved || seen.has(resolved)) {
+        return;
+      }
+
+      seen.add(resolved);
+      route.push(resolved);
+    };
+
+    addRouteCell(this.taskTargets.piano);
+    addRouteCell(this.taskTargets.runningMachine);
+    addRouteCell(this.taskTargets.chair);
+    addRouteCell(this.taskTargets.computerDesk || this.taskTargets.letterDesk);
+    addRouteCell(this.taskTargets.door);
+
+    const walkableCells: Array<{ col: number; row: number }> = [];
+    for (const key of this.grid.walkable) {
+      const parsed = parseCellKey(key);
+      if (parsed) {
+        walkableCells.push(parsed);
+      }
+    }
+
+    if (walkableCells.length > 0) {
+      let minCol = walkableCells[0].col;
+      let maxCol = walkableCells[0].col;
+      let minRow = walkableCells[0].row;
+      let maxRow = walkableCells[0].row;
+
+      walkableCells.forEach((cell) => {
+        if (cell.col < minCol) minCol = cell.col;
+        if (cell.col > maxCol) maxCol = cell.col;
+        if (cell.row < minRow) minRow = cell.row;
+        if (cell.row > maxRow) maxRow = cell.row;
+      });
+
+      const samples = [
+        { x: 0.08, y: 0.15 },
+        { x: 0.5, y: 0.15 },
+        { x: 0.9, y: 0.15 },
+        { x: 0.12, y: 0.5 },
+        { x: 0.86, y: 0.5 },
+        { x: 0.12, y: 0.86 },
+        { x: 0.5, y: 0.86 },
+        { x: 0.9, y: 0.86 },
+      ];
+
+      samples.forEach((sample) => {
+        const col = Math.round(minCol + (maxCol - minCol) * sample.x);
+        const row = Math.round(minRow + (maxRow - minRow) * sample.y);
+        addRouteCell(toCellKey(col, row));
+      });
+    }
+
+    return route;
   }
 
   private getDeterministicBeatRoll(beatIndex: number, salt: number): number {
