@@ -32,9 +32,12 @@ interface TaskTargets {
 }
 
 interface AnimationSpec {
+  animationKey: string;
   texture: string;
+  fallbackTexture?: string;
   frameCount: number;
   framesPerRow?: number;
+  frameRate: number;
 }
 
 interface OcclusionZone {
@@ -118,6 +121,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private lastProfilePushAt = 0;
   private lastRoutineBeatIndex = -1;
   private doorPhase: 'none' | 'to_door' | 'opening' | 'outside' | 'returning' = 'none';
+  private preparedSpriteSheets = new Set<string>();
+  private missingOptionalTextures = new Set<string>();
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -130,24 +135,54 @@ export default class LifeSimScene extends Phaser.Scene {
     { startRatio: 0.92, endRatio: 1.01, label: 'night rest', task: 'sleep' },
   ];
 
-  private readonly animationSpecs: Record<string, AnimationSpec> = {
-    manWalkDown: { texture: 'man-walk-down', frameCount: 16, framesPerRow: 4 },
-    manWalkUp: { texture: 'man-walk-up', frameCount: 16, framesPerRow: 4 },
-    manWalkLeft: { texture: 'man-walk-left', frameCount: 16, framesPerRow: 4 },
-    manWalkRight: { texture: 'man-walk-right', frameCount: 16, framesPerRow: 4 },
-    manSleep: { texture: 'man-sleep', frameCount: 16, framesPerRow: 4 },
-    manUseObject: { texture: 'man-use-object', frameCount: 36, framesPerRow: 6 },
-    dogWalkDown: { texture: 'dog-walk-down', frameCount: 16, framesPerRow: 4 },
-    dogWalkUp: { texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4 },
-    dogWalkLeft: { texture: 'dog-walk-left', frameCount: 16, framesPerRow: 4 },
-    dogWalkRight: { texture: 'dog-walk-right', frameCount: 16, framesPerRow: 4 },
-  };
+  private readonly animationSpecs: readonly AnimationSpec[] = [
+    { animationKey: 'man-anim-walk-down', texture: 'man-walk-down', frameCount: 16, framesPerRow: 4, frameRate: 10 },
+    { animationKey: 'man-anim-walk-up', texture: 'man-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 10 },
+    { animationKey: 'man-anim-walk-left', texture: 'man-walk-left', frameCount: 16, framesPerRow: 4, frameRate: 10 },
+    { animationKey: 'man-anim-walk-right', texture: 'man-walk-right', frameCount: 16, framesPerRow: 4, frameRate: 10 },
+    {
+      animationKey: 'man-anim-idle-stand',
+      texture: 'man-idle-stand',
+      fallbackTexture: 'man-walk-down',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 4,
+    },
+    {
+      animationKey: 'man-anim-sit-chair',
+      texture: 'man-sit-chair',
+      fallbackTexture: 'man-sleep',
+      frameCount: 16,
+      framesPerRow: 4,
+      frameRate: 5,
+    },
+    {
+      animationKey: 'man-anim-use-computer',
+      texture: 'man-use-computer',
+      fallbackTexture: 'man-use-object',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 9,
+    },
+    { animationKey: 'man-anim-sleep', texture: 'man-sleep', frameCount: 16, framesPerRow: 4, frameRate: 6 },
+    { animationKey: 'man-anim-use-object', texture: 'man-use-object', frameCount: 36, framesPerRow: 6, frameRate: 14 },
+    { animationKey: 'dog-anim-walk-down', texture: 'dog-walk-down', frameCount: 16, framesPerRow: 4, frameRate: 12 },
+    { animationKey: 'dog-anim-walk-up', texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 12 },
+    { animationKey: 'dog-anim-walk-left', texture: 'dog-walk-left', frameCount: 16, framesPerRow: 4, frameRate: 12 },
+    { animationKey: 'dog-anim-walk-right', texture: 'dog-walk-right', frameCount: 16, framesPerRow: 4, frameRate: 12 },
+  ];
 
   constructor() {
     super('LifeSimScene');
   }
 
   preload(): void {
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+      if (file.key === 'man-idle-stand' || file.key === 'man-sit-chair' || file.key === 'man-use-computer') {
+        this.missingOptionalTextures.add(file.key);
+      }
+    });
+
     this.load.image('background', '/background/house-background.png');
 
     this.load.image('man-walk-down', '/sprites/man-walking-down.png');
@@ -156,6 +191,10 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-walk-right', '/sprites/man-walking-right.png');
     this.load.image('man-sleep', '/sprites/man-sleeping.png');
     this.load.image('man-use-object', '/sprites/man-using-object.png');
+    // Optional dedicated clips for Phase 6.1b. If files are missing, runtime fallbacks are used.
+    this.load.image('man-idle-stand', '/sprites/man-idle-stand.png');
+    this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
+    this.load.image('man-use-computer', '/sprites/man-use-computer.png');
 
     this.load.image('dog-walk-down', '/sprites/dog-walking-down.png');
     this.load.image('dog-walk-up', '/sprites/dog-walking-up.png');
@@ -215,6 +254,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('system', `${this.identity.name} moved in. Personality locked for this life.`);
     this.emitLog('system', 'Simulation hidden mode enabled. Use Ring Bell or polite commands.');
     this.emitLog('system', 'Phase 6.1 routine enabled: idle stand, sit chair, and computer use are active.');
+    this.reportOptionalAnimationFallbacks();
+    this.runStartupAudit();
     this.emitProfile();
   }
 
@@ -240,6 +281,12 @@ export default class LifeSimScene extends Phaser.Scene {
 
   public ringBell(): void {
     this.ringBellCount += 1;
+    if (!this.isTaskAvailable('door_delivery')) {
+      this.emitLog('system', 'Door flow is not configured in this layout.');
+      this.emitAudioCue('negative');
+      return;
+    }
+
     if (this.deliveryQueued || this.doorPhase !== 'none' || this.man.currentTask.type === 'door_delivery') {
       this.emitLog('system', 'The bell rings, but a delivery is already in progress.');
       this.emitAudioCue('negative');
@@ -285,11 +332,16 @@ export default class LifeSimScene extends Phaser.Scene {
       return;
     }
 
+    const intendedTask = this.resolveTaskWithAvailability(command.intent);
+    if (intendedTask !== command.intent) {
+      this.emitLog('system', `That request is unavailable in this layout. Falling back to ${textForTask(intendedTask)}.`);
+    }
+
     this.enqueueTask({
-      type: command.intent,
+      type: intendedTask,
       fromPlayerCommand: command.normalized,
     });
-    this.emitLog('man', `Okay, I will ${textForTask(command.intent)}.`);
+    this.emitLog('man', `Okay, I will ${textForTask(intendedTask)}.`);
     this.recordCommandOutcome(true);
     this.identity.mood = onCommandAccepted(this.identity.mood);
     this.emitAudioCue('positive');
@@ -297,29 +349,38 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private prepareAllAnimations(): void {
-    Object.values(this.animationSpecs).forEach((spec) => {
-      this.prepareSpriteSheet(spec.texture, spec.frameCount, spec.framesPerRow);
+    this.animationSpecs.forEach((spec) => {
+      const texture = this.resolveTexture(spec.texture, spec.fallbackTexture);
+      this.prepareSpriteSheet(texture, spec.frameCount, spec.framesPerRow);
+      this.createLoopAnimation(spec.animationKey, texture, spec.frameCount, spec.frameRate);
     });
+  }
 
-    this.createLoopAnimation('man-anim-walk-down', 'man-walk-down', 16, 10);
-    this.createLoopAnimation('man-anim-walk-up', 'man-walk-up', 16, 10);
-    this.createLoopAnimation('man-anim-walk-left', 'man-walk-left', 16, 10);
-    this.createLoopAnimation('man-anim-walk-right', 'man-walk-right', 16, 10);
-    this.createLoopAnimation('man-anim-idle-stand', 'man-walk-down', 16, 4);
-    this.createLoopAnimation('man-anim-sit-chair', 'man-sleep', 16, 5);
-    this.createLoopAnimation('man-anim-use-computer', 'man-use-object', 36, 9);
-    this.createLoopAnimation('man-anim-sleep', 'man-sleep', 16, 6);
-    this.createLoopAnimation('man-anim-use-object', 'man-use-object', 36, 14);
-
-    this.createLoopAnimation('dog-anim-walk-down', 'dog-walk-down', 16, 12);
-    this.createLoopAnimation('dog-anim-walk-up', 'dog-walk-up', 16, 12);
-    this.createLoopAnimation('dog-anim-walk-left', 'dog-walk-left', 16, 12);
-    this.createLoopAnimation('dog-anim-walk-right', 'dog-walk-right', 16, 12);
+  private resolveTexture(primary: string, fallback?: string): string {
+    if (this.textures.exists(primary)) {
+      return primary;
+    }
+    if (fallback && this.textures.exists(fallback)) {
+      return fallback;
+    }
+    return primary;
   }
 
   private prepareSpriteSheet(textureKey: string, frameCount: number, framesPerRow?: number): void {
+    if (!this.textures.exists(textureKey) || this.preparedSpriteSheets.has(textureKey)) {
+      return;
+    }
+
     const texture = this.textures.get(textureKey);
+    if (texture.frameTotal > 1) {
+      this.preparedSpriteSheets.add(textureKey);
+      return;
+    }
+
     const source = texture.getSourceImage() as HTMLImageElement;
+    if (!source || !source.width || !source.height) {
+      return;
+    }
 
     let columns = framesPerRow || Math.round(Math.sqrt(frameCount));
     if (columns <= 0 || frameCount % columns !== 0) {
@@ -336,6 +397,7 @@ export default class LifeSimScene extends Phaser.Scene {
       frameHeight,
       endFrame: frameCount - 1,
     });
+    this.preparedSpriteSheets.add(textureKey);
   }
 
   private createLoopAnimation(key: string, texture: string, frameCount: number, frameRate: number): void {
@@ -374,12 +436,57 @@ export default class LifeSimScene extends Phaser.Scene {
     this.events.emit('ui-profile', this.identity);
   }
 
+  private reportOptionalAnimationFallbacks(): void {
+    const fallbacks: Array<{ key: string; label: string; fallback: string }> = [
+      { key: 'man-idle-stand', label: 'idle stand', fallback: 'man-walk-down' },
+      { key: 'man-sit-chair', label: 'sit chair', fallback: 'man-sleep' },
+      { key: 'man-use-computer', label: 'use computer', fallback: 'man-use-object' },
+    ];
+
+    fallbacks.forEach((item) => {
+      if (this.missingOptionalTextures.has(item.key)) {
+        this.emitLog('system', `Animation fallback active for ${item.label} (using ${item.fallback}).`);
+      }
+    });
+  }
+
+  private runStartupAudit(): void {
+    const issues: string[] = [];
+    if (this.grid.walkable.size === 0) {
+      issues.push('walk masks are empty');
+    }
+    if (runtimeContract.doorFlow.enabled && !this.taskTargets.door) {
+      issues.push('door target is missing');
+    }
+    if (!this.taskTargets.computerDesk) {
+      issues.push('computer desk target is missing');
+    }
+    if (!this.taskTargets.chair) {
+      issues.push('chair target is missing');
+    }
+    if (!this.taskTargets.runningMachine) {
+      issues.push('running machine target is missing');
+    }
+    if (!this.taskTargets.piano) {
+      issues.push('piano target is missing');
+    }
+
+    if (issues.length === 0) {
+      this.emitLog('system', 'Core audit: navigation, routine targets, and command framework are ready.');
+      return;
+    }
+
+    issues.forEach((issue) => {
+      this.emitLog('system', `Core audit warning: ${issue}.`);
+    });
+  }
+
   private advanceDay(deltaMs: number): void {
     this.dayElapsedMs += deltaMs;
 
     if (!this.autoDeliveryTriggered && this.dayElapsedMs >= DAY_DURATION_MS * 0.55) {
       this.autoDeliveryTriggered = true;
-      if (!this.deliveryQueued) {
+      if (!this.deliveryQueued && this.isTaskAvailable('door_delivery')) {
         this.deliveryQueued = true;
         this.emitLog('system', 'A delivery arrived at the front door.');
         this.enqueueTask({ type: 'door_delivery' }, true);
@@ -624,6 +731,43 @@ export default class LifeSimScene extends Phaser.Scene {
     }
   }
 
+  private taskNeedsTarget(task: TaskType): boolean {
+    return (
+      task === 'sit_chair' ||
+      task === 'use_computer' ||
+      task === 'use_running_machine' ||
+      task === 'play_piano' ||
+      task === 'play_another_song' ||
+      task === 'type_letter' ||
+      task === 'door_delivery'
+    );
+  }
+
+  private isTaskAvailable(task: TaskType): boolean {
+    if (!this.taskNeedsTarget(task)) {
+      return true;
+    }
+    if (task === 'door_delivery') {
+      return Boolean(this.taskTargets.door);
+    }
+    return this.getTargetForTask(task) !== null;
+  }
+
+  private resolveTaskWithAvailability(task: TaskType): TaskType {
+    if (this.isTaskAvailable(task)) {
+      return task;
+    }
+
+    const fallbackTasks: TaskType[] = ['idle_stand', 'wander', 'type_letter', 'play_piano', 'sleep', 'idle'];
+    for (const candidate of fallbackTasks) {
+      if (this.isTaskAvailable(candidate)) {
+        return candidate;
+      }
+    }
+
+    return 'idle';
+  }
+
   private finishManTask(): void {
     this.man.currentTask = { type: 'idle' };
     this.man.performUntilMs = 0;
@@ -732,8 +876,9 @@ export default class LifeSimScene extends Phaser.Scene {
     const dayRatio = this.dayElapsedMs / DAY_DURATION_MS;
     const beatIndex = this.routineBeats.findIndex((beat) => dayRatio >= beat.startRatio && dayRatio < beat.endRatio);
     const beat = this.routineBeats[Math.max(0, beatIndex)];
+    const beatChanged = beatIndex !== this.lastRoutineBeatIndex;
 
-    if (beatIndex !== this.lastRoutineBeatIndex) {
+    if (beatChanged) {
       this.lastRoutineBeatIndex = beatIndex;
       this.emitLog('system', `Routine shift: ${beat.label}.`);
       this.emitAudioCue('routine_shift');
@@ -754,7 +899,12 @@ export default class LifeSimScene extends Phaser.Scene {
       ]);
     }
 
-    this.man.currentTask = { type: task };
+    const resolvedTask = this.resolveTaskWithAvailability(task);
+    if (resolvedTask !== task && beatChanged) {
+      this.emitLog('system', `Routine fallback: ${textForTask(task)} unavailable, using ${textForTask(resolvedTask)}.`);
+    }
+
+    this.man.currentTask = { type: resolvedTask };
     this.man.performUntilMs = 0;
   }
 

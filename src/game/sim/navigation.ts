@@ -4,6 +4,7 @@ export interface NavigationGrid {
   gridSize: number;
   walkable: Set<CellKey>;
   hardBlockers: Set<CellKey>;
+  softBlockers: Set<CellKey>;
   widthCells: number;
   heightCells: number;
 }
@@ -26,11 +27,12 @@ export function createNavigationGrid(contract: {
   gridSize: number;
   movement: {
     walkMasks: { lr: readonly string[]; up: readonly string[]; down: readonly string[] };
-    blockers: { hard: readonly string[] };
+    blockers: { hard: readonly string[]; soft?: readonly string[] };
   };
 }): NavigationGrid {
   const walkable = new Set<CellKey>();
   const hardBlockers = new Set<CellKey>();
+  const softBlockers = new Set<CellKey>();
   let maxCol = 0;
   let maxRow = 0;
 
@@ -60,6 +62,16 @@ export function createNavigationGrid(contract: {
     maxRow = Math.max(maxRow, cell.row);
   });
 
+  (contract.movement.blockers.soft || []).forEach((key) => {
+    const cell = parseCellKey(key);
+    if (!cell) {
+      return;
+    }
+    softBlockers.add(key as CellKey);
+    maxCol = Math.max(maxCol, cell.col);
+    maxRow = Math.max(maxRow, cell.row);
+  });
+
   hardBlockers.forEach((key) => {
     walkable.delete(key);
   });
@@ -68,6 +80,7 @@ export function createNavigationGrid(contract: {
     gridSize: contract.gridSize,
     walkable,
     hardBlockers,
+    softBlockers,
     widthCells: maxCol + 1,
     heightCells: maxRow + 1,
   };
@@ -104,6 +117,14 @@ function getNeighbors(cell: CellKey): CellKey[] {
   ];
 }
 
+function traversalCost(grid: NavigationGrid, cell: CellKey): number {
+  // Ghost-with-soft-rules: soft blockers are traversable but discouraged.
+  if (grid.softBlockers.has(cell)) {
+    return 2.6;
+  }
+  return 1;
+}
+
 export function findPathBfs(grid: NavigationGrid, start: CellKey, goal: CellKey): CellKey[] {
   if (start === goal) {
     return [start];
@@ -113,38 +134,48 @@ export function findPathBfs(grid: NavigationGrid, start: CellKey, goal: CellKey)
     return [];
   }
 
-  const queue: CellKey[] = [start];
-  const visited = new Set<CellKey>([start]);
+  const queue: Array<{ cell: CellKey; cost: number }> = [{ cell: start, cost: 0 }];
+  const bestCost = new Map<CellKey, number>([[start, 0]]);
   const previous = new Map<CellKey, CellKey>();
 
   while (queue.length > 0) {
-    const current = queue.shift() as CellKey;
+    queue.sort((a, b) => a.cost - b.cost);
+    const current = queue.shift() as { cell: CellKey; cost: number };
 
-    for (const neighbor of getNeighbors(current)) {
-      if (!grid.walkable.has(neighbor) || visited.has(neighbor)) {
+    if (current.cell === goal) {
+      break;
+    }
+
+    for (const neighbor of getNeighbors(current.cell)) {
+      if (!grid.walkable.has(neighbor)) {
         continue;
       }
 
-      visited.add(neighbor);
-      previous.set(neighbor, current);
-
-      if (neighbor === goal) {
-        const reversed: CellKey[] = [goal];
-        let step: CellKey | undefined = goal;
-        while (step && step !== start) {
-          step = previous.get(step);
-          if (step) {
-            reversed.push(step);
-          }
-        }
-        return reversed.reverse();
+      const nextCost = current.cost + traversalCost(grid, neighbor);
+      const known = bestCost.get(neighbor);
+      if (known !== undefined && known <= nextCost) {
+        continue;
       }
 
-      queue.push(neighbor);
+      bestCost.set(neighbor, nextCost);
+      previous.set(neighbor, current.cell);
+      queue.push({ cell: neighbor, cost: nextCost });
     }
   }
 
-  return [];
+  if (!previous.has(goal)) {
+    return [];
+  }
+
+  const reversed: CellKey[] = [goal];
+  let step: CellKey | undefined = goal;
+  while (step && step !== start) {
+    step = previous.get(step);
+    if (step) {
+      reversed.push(step);
+    }
+  }
+  return reversed.reverse();
 }
 
 export function findNearestWalkableCell(grid: NavigationGrid, source: CellKey): CellKey | null {

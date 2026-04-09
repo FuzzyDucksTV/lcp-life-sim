@@ -68,7 +68,10 @@ export function resolveTaskTargetCells(grid: NavigationGrid): {
   letterDesk: CellKey | null;
   door: CellKey | null;
 } {
-  const chairObject = findObjectByKeywords(['chair']);
+  const chairObject =
+    findObjectByKeywords(['chair']) ||
+    findObjectByKeywords(['settee', 'sofa']) ||
+    findObjectByKeywords(['bed_']);
   const computerDeskObject = findObjectByKeywords(['computerdesk']);
   const runningMachineObject = findObjectByKeywords(['runningmachine']);
   const pianoObject = findObjectByKeywords(['piano']);
