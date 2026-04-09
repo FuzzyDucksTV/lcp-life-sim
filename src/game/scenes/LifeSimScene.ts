@@ -2517,6 +2517,11 @@ export default class LifeSimScene extends Phaser.Scene {
     let task: TaskType = beat.task;
     const beatRoll = this.getDeterministicBeatRoll(beatIndex, 1);
 
+    // One-shot tasks: only run once per beat, then idle for the rest
+    if (task === 'use_running_machine' && !beatChanged) {
+      task = 'idle_stand';
+    }
+
     if (task === 'play_piano' && this.identity.personality.playfulness > 0.66 && beatRoll < 0.33) {
       task = 'dance';
     } else if (task === 'use_computer' && this.identity.personality.diligence > 0.7 && beatRoll < 0.35) {
