@@ -356,6 +356,14 @@ export default class LifeSimScene extends Phaser.Scene {
       frameRate: 9,
     },
     { animationKey: 'man-anim-sleep', texture: 'man-sleep', frameCount: 16, framesPerRow: 4, frameRate: 6 },
+    {
+      animationKey: 'man-anim-running-machine',
+      texture: 'man-running-machine',
+      fallbackTexture: 'man-use-object',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 14,
+    },
     { animationKey: 'man-anim-use-object', texture: 'man-use-object', frameCount: 36, framesPerRow: 6, frameRate: 14 },
     { animationKey: 'dog-anim-walk-down', texture: 'dog-walk-down', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-up', texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 12 },
@@ -375,6 +383,7 @@ export default class LifeSimScene extends Phaser.Scene {
         'man-sit-away',
         'man-nod',
         'man-shake',
+        'man-running-machine',
       ]);
       if (optionalAnimationKeys.has(file.key)) {
         this.missingOptionalTextures.add(file.key);
@@ -400,6 +409,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-sit-away', '/sprites/sitting-facing-away.png');
     this.load.image('man-nod', '/sprites/noddinghead.png');
     this.load.image('man-shake', '/sprites/shakinghead.png');
+    this.load.image('man-running-machine', '/sprites/running-runningmachine-36frames.png');
     // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
     this.load.image('man-use-computer', '/sprites/man-use-computer.png');
@@ -738,6 +748,7 @@ export default class LifeSimScene extends Phaser.Scene {
       { key: 'man-sit-away', label: 'sit away', fallback: 'man-use-computer' },
       { key: 'man-nod', label: 'nod reaction', fallback: 'man-idle-stand' },
       { key: 'man-shake', label: 'shake reaction', fallback: 'man-idle-stand' },
+      { key: 'man-running-machine', label: 'running machine', fallback: 'man-use-object' },
     ];
 
     fallbacks.forEach((item) => {
@@ -1506,8 +1517,8 @@ export default class LifeSimScene extends Phaser.Scene {
         this.applyNpcScaleForTexture(npc, 'man-sleep');
         npc.sprite.play('man-anim-sleep', true);
       } else if (task === 'use_running_machine') {
-        this.applyNpcScaleForTexture(npc, 'man-use-object');
-        npc.sprite.play('man-anim-use-object', true);
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-running-machine', 'man-use-object'));
+        npc.sprite.play('man-anim-running-machine', true);
       } else if (
         task === 'take_shower' ||
         task === 'use_toilet' ||
@@ -1906,8 +1917,8 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (task === 'use_running_machine') {
-      this.applyNpcScaleForTexture(this.man, 'man-use-object');
-      this.man.sprite.play('man-anim-use-object', true);
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-running-machine', 'man-use-object'));
+      this.man.sprite.play('man-anim-running-machine', true);
       return;
     }
 
