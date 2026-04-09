@@ -681,8 +681,12 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private createLoopAnimation(key: string, texture: string, frameCount: number, frameRate: number): void {
-    if (this.anims.exists(key)) {
+    if (!this.textures.exists(texture)) {
       return;
+    }
+
+    if (this.anims.exists(key)) {
+      this.anims.remove(key);
     }
 
     this.anims.create({
