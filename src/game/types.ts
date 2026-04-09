@@ -60,6 +60,7 @@ export type TaskType =
   | 'type_letter'
   | 'eating_food'
   | 'collect_washing'
+  | 'use_tv'
   | 'door_delivery';
 
 export interface NpcTask {
