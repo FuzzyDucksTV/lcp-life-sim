@@ -18,6 +18,7 @@ const QUEUE_FOLLOWUP_DELAY_MS = 1_600;
 const DAILY_REFLECTION_DELAY_MS = 2_400;
 const FAST_COMMAND_WINDOW_MS = 2_600;
 const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
+const NPC_RENDER_Y_OFFSET = -10;
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -271,7 +272,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.man = {
       id: 'man',
-      sprite: this.add.sprite(manSpawn.x, manSpawn.y, 'man-walk-down', 0).setScale(manScale),
+      sprite: this.add.sprite(manSpawn.x, this.toRenderY(manSpawn.y), 'man-walk-down', 0).setScale(manScale),
       path: [],
       currentTask: { type: 'idle', source: 'system', priority: 0, resumable: false },
       performUntilMs: 0,
@@ -282,7 +283,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.dog = {
       id: 'dog',
-      sprite: this.add.sprite(dogSpawn.x, dogSpawn.y, 'dog-walk-down', 0).setScale(dogScale),
+      sprite: this.add.sprite(dogSpawn.x, this.toRenderY(dogSpawn.y), 'dog-walk-down', 0).setScale(dogScale),
       path: [],
       currentTask: { type: 'wander', source: 'system', priority: 0, resumable: false },
       performUntilMs: 0,
@@ -320,8 +321,8 @@ export default class LifeSimScene extends Phaser.Scene {
 
     this.applyOcclusionVisibility(this.man);
     this.applyOcclusionVisibility(this.dog);
-    this.man.sprite.depth = this.man.sprite.y;
-    this.dog.sprite.depth = this.dog.sprite.y;
+    this.man.sprite.depth = this.toLogicalY(this.man.sprite.y);
+    this.dog.sprite.depth = this.toLogicalY(this.dog.sprite.y);
   }
 
   public ringBell(): void {
@@ -1185,7 +1186,7 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private getDogInteractionCell(): CellKey | null {
-    const dogCell = worldToCell({ x: this.dog.sprite.x, y: this.dog.sprite.y }, runtimeContract.gridSize);
+    const dogCell = worldToCell({ x: this.dog.sprite.x, y: this.toLogicalY(this.dog.sprite.y) }, runtimeContract.gridSize);
     const [colRaw, rowRaw] = dogCell.split(',');
     const baseCol = Number(colRaw);
     const baseRow = Number(rowRaw);
@@ -1283,12 +1284,13 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const nextCell = npc.path[0];
     const nextPoint = cellToWorldCenter(nextCell, runtimeContract.gridSize);
+    const targetY = this.toRenderY(nextPoint.y);
     const dx = nextPoint.x - npc.sprite.x;
-    const dy = nextPoint.y - npc.sprite.y;
+    const dy = targetY - npc.sprite.y;
     const distance = Math.hypot(dx, dy);
 
     if (distance <= 1.4) {
-      npc.sprite.setPosition(nextPoint.x, nextPoint.y);
+      npc.sprite.setPosition(nextPoint.x, targetY);
       npc.path.shift();
       if (npc.path.length === 0) {
         this.playNpcIdle(npc);
@@ -1307,12 +1309,12 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private isNpcAtCell(npc: NpcRuntime, cell: CellKey): boolean {
-    const current = worldToCell({ x: npc.sprite.x, y: npc.sprite.y }, runtimeContract.gridSize);
+    const current = worldToCell({ x: npc.sprite.x, y: this.toLogicalY(npc.sprite.y) }, runtimeContract.gridSize);
     return current === cell;
   }
 
   private rebuildPathForNpc(npc: NpcRuntime, targetCell: CellKey): void {
-    const currentCell = worldToCell({ x: npc.sprite.x, y: npc.sprite.y }, runtimeContract.gridSize);
+    const currentCell = worldToCell({ x: npc.sprite.x, y: this.toLogicalY(npc.sprite.y) }, runtimeContract.gridSize);
     const start = findNearestWalkableCell(this.grid, currentCell) || targetCell;
     const goal = findNearestWalkableCell(this.grid, targetCell) || targetCell;
 
@@ -1446,7 +1448,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (this.dog.path.length === 0) {
-      const manCell = worldToCell({ x: this.man.sprite.x, y: this.man.sprite.y }, runtimeContract.gridSize);
+      const manCell = worldToCell({ x: this.man.sprite.x, y: this.toLogicalY(this.man.sprite.y) }, runtimeContract.gridSize);
       const followBias = Math.random() < 0.6;
 
       if (followBias) {
@@ -1479,12 +1481,13 @@ export default class LifeSimScene extends Phaser.Scene {
     if (this.dog.path.length > 0) {
       const nextCell = this.dog.path[0];
       const nextPoint = cellToWorldCenter(nextCell, runtimeContract.gridSize);
+      const targetY = this.toRenderY(nextPoint.y);
       const dx = nextPoint.x - this.dog.sprite.x;
-      const dy = nextPoint.y - this.dog.sprite.y;
+      const dy = targetY - this.dog.sprite.y;
       const distance = Math.hypot(dx, dy);
 
       if (distance <= 1.5) {
-        this.dog.sprite.setPosition(nextPoint.x, nextPoint.y);
+        this.dog.sprite.setPosition(nextPoint.x, targetY);
         this.dog.path.shift();
         if (this.dog.path.length === 0) {
           this.playDogIdle();
@@ -1501,8 +1504,16 @@ export default class LifeSimScene extends Phaser.Scene {
     sprite.anims.pause(sprite.anims.currentFrame ?? undefined);
   }
 
+  private toRenderY(logicalY: number): number {
+    return logicalY + NPC_RENDER_Y_OFFSET;
+  }
+
+  private toLogicalY(renderY: number): number {
+    return renderY - NPC_RENDER_Y_OFFSET;
+  }
+
   private getDogCompanionCellNearMan(): CellKey | null {
-    const manCell = worldToCell({ x: this.man.sprite.x, y: this.man.sprite.y }, runtimeContract.gridSize);
+    const manCell = worldToCell({ x: this.man.sprite.x, y: this.toLogicalY(this.man.sprite.y) }, runtimeContract.gridSize);
     const [colRaw, rowRaw] = manCell.split(',');
     const col = Number(colRaw);
     const row = Number(rowRaw);
@@ -1530,6 +1541,7 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     const zones = runtimeContract.occlusion.zones as readonly OcclusionZone[];
+    const logicalY = this.toLogicalY(npc.sprite.y);
     const hidden = zones.some((zone) => {
       if (zone.mode === 'show') {
         return false;
@@ -1538,8 +1550,8 @@ export default class LifeSimScene extends Phaser.Scene {
       return (
         npc.sprite.x >= zone.x &&
         npc.sprite.x <= zone.x + zone.width &&
-        npc.sprite.y >= zone.y &&
-        npc.sprite.y <= zone.y + zone.height
+        logicalY >= zone.y &&
+        logicalY <= zone.y + zone.height
       );
     });
 
