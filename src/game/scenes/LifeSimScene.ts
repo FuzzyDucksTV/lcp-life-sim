@@ -1622,19 +1622,19 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (task === 'sleep') {
+      const bedAnchor = this.actionAnchors['lay_bed'];
       const bedTarget = this.getActionAnchorTargetCell('lay_bed');
-      if (bedTarget && !this.isNpcAtCell(npc, bedTarget) && npc.performUntilMs === 0) {
+      if (bedTarget && npc.performUntilMs === 0) {
         const reached = this.moveNpcToCell(npc, bedTarget, time);
         if (!reached) return;
-        const anchor = this.actionAnchors['lay_bed'];
-        if (anchor) {
-          npc.sprite.setPosition(anchor.x, this.toRenderY(anchor.y, npc.id));
-        }
       }
       if (npc.performUntilMs === 0) {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
         this.applyNpcScaleForTexture(npc, 'man-walk-down');
         npc.sprite.play('man-anim-sleep', true);
+      }
+      if (bedAnchor) {
+        npc.sprite.setPosition(bedAnchor.x, this.toRenderY(bedAnchor.y, npc.id));
       }
       if (time >= npc.performUntilMs) {
         this.finishManTask(npc.currentTask, time);
