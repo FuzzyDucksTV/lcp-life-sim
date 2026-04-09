@@ -23,7 +23,7 @@ import { loadOrCreateIdentity, loadSnapshot, saveSnapshot } from '../sim/saveSta
 import { getComplianceChance, onCommandAccepted, onCommandRejected, tickMood } from '../sim/mood';
 import type { CellKey, CommandLogEntry, ManIdentity, NpcTask, TaskType } from '../types';
 
-const DAY_DURATION_MS = 15 * 60 * 1000;
+const DAY_DURATION_MS = 60 * 60 * 1000;
 const PROFILE_REFRESH_INTERVAL_MS = 2_000;
 const MAN_MOVE_SPEED = 74;
 const DOG_MOVE_SPEED = 86;
@@ -39,9 +39,9 @@ const MAN_RENDER_Y_OFFSET = -54;
 const DOG_RENDER_Y_OFFSET = -20;
 const MAN_DESIRED_HEIGHT_PX = 172;
 const DOG_DESIRED_HEIGHT_PX = 90;
-const MAN_REACTION_ACK_MS = 900;
-const MAN_REACTION_REJECT_MS = 900;
-const MAN_REACTION_BELL_MS = 900;
+const MAN_REACTION_ACK_MS = 2_000;
+const MAN_REACTION_REJECT_MS = 2_000;
+const MAN_REACTION_BELL_MS = 2_000;
 const STARTUP_EXPLORATION_DELAY_MS = 3_000;
 const STARTUP_EXPLORATION_PRIORITY = 35;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
@@ -356,6 +356,14 @@ export default class LifeSimScene extends Phaser.Scene {
       frameRate: 9,
     },
     { animationKey: 'man-anim-sleep', texture: 'man-sleep', frameCount: 16, framesPerRow: 4, frameRate: 6 },
+    {
+      animationKey: 'man-anim-running-machine',
+      texture: 'man-running-machine',
+      fallbackTexture: 'man-use-object',
+      frameCount: 36,
+      framesPerRow: 6,
+      frameRate: 14,
+    },
     { animationKey: 'man-anim-use-object', texture: 'man-use-object', frameCount: 36, framesPerRow: 6, frameRate: 14 },
     { animationKey: 'dog-anim-walk-down', texture: 'dog-walk-down', frameCount: 16, framesPerRow: 4, frameRate: 12 },
     { animationKey: 'dog-anim-walk-up', texture: 'dog-walk-up', frameCount: 16, framesPerRow: 4, frameRate: 12 },
@@ -375,6 +383,7 @@ export default class LifeSimScene extends Phaser.Scene {
         'man-sit-away',
         'man-nod',
         'man-shake',
+        'man-running-machine',
       ]);
       if (optionalAnimationKeys.has(file.key)) {
         this.missingOptionalTextures.add(file.key);
@@ -400,6 +409,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.image('man-sit-away', '/sprites/sitting-facing-away.png');
     this.load.image('man-nod', '/sprites/noddinghead.png');
     this.load.image('man-shake', '/sprites/shakinghead.png');
+    this.load.image('man-running-machine', '/sprites/running-runningmachine-36frames.png');
     // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
     this.load.image('man-use-computer', '/sprites/man-use-computer.png');
@@ -738,6 +748,7 @@ export default class LifeSimScene extends Phaser.Scene {
       { key: 'man-sit-away', label: 'sit away', fallback: 'man-use-computer' },
       { key: 'man-nod', label: 'nod reaction', fallback: 'man-idle-stand' },
       { key: 'man-shake', label: 'shake reaction', fallback: 'man-idle-stand' },
+      { key: 'man-running-machine', label: 'running machine', fallback: 'man-use-object' },
     ];
 
     fallbacks.forEach((item) => {
@@ -1506,8 +1517,8 @@ export default class LifeSimScene extends Phaser.Scene {
         this.applyNpcScaleForTexture(npc, 'man-sleep');
         npc.sprite.play('man-anim-sleep', true);
       } else if (task === 'use_running_machine') {
-        this.applyNpcScaleForTexture(npc, 'man-use-object');
-        npc.sprite.play('man-anim-use-object', true);
+        this.applyNpcScaleForTexture(npc, this.resolveTexture('man-running-machine', 'man-use-object'));
+        npc.sprite.play('man-anim-running-machine', true);
       } else if (
         task === 'take_shower' ||
         task === 'use_toilet' ||
@@ -1536,56 +1547,59 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private getTaskDuration(task: TaskType): number {
+    const between = (minMs: number, maxMs: number): number => Phaser.Math.Between(minMs, maxMs);
+
     switch (task) {
       case 'idle':
       case 'idle_stand':
-        return 7_000;
+        return between(10_000, 22_000);
       case 'pet_dog':
-        return 6_500;
+        return between(20_000, 40_000);
       case 'sit_chair':
       case 'sit_sofa':
       case 'sit_settee':
+        return between(20_000, 55_000);
       case 'sit_computer_desk':
       case 'sit_piano':
-        return 9_500;
+        return between(30_000, 120_000);
       case 'lay_bed':
-        return 12_000;
+        return between(35_000, 90_000);
       case 'use_computer':
-        return 11_000;
+        return between(30_000, 120_000);
       case 'type_letter':
-        return 12_000;
+        return between(30_000, 95_000);
       case 'use_running_machine':
-        return 10_000;
+        return between(60_000, 150_000);
       case 'take_shower':
-        return 11_000;
+        return between(20_000, 45_000);
       case 'use_toilet':
-        return 8_000;
+        return between(20_000, 35_000);
       case 'use_fridge':
-        return 7_000;
+        return between(20_000, 32_000);
       case 'use_kitchen_sink':
-        return 9_000;
+        return between(20_000, 40_000);
       case 'use_washing_machine':
-        return 10_000;
+        return between(20_000, 45_000);
       case 'use_dishwasher':
-        return 9_000;
+        return between(20_000, 42_000);
       case 'open_kitchen_cupboard':
-        return 7_500;
+        return between(20_000, 36_000);
       case 'use_bookcase':
-        return 8_500;
+        return between(20_000, 45_000);
       case 'use_kitchen_worktop':
-        return 9_500;
+        return between(20_000, 50_000);
       case 'use_cooker':
-        return 10_500;
+        return between(20_000, 55_000);
       case 'use_wardrobe':
-        return 8_500;
+        return between(20_000, 40_000);
       case 'play_piano':
-        return 12_000;
+        return between(40_000, 150_000);
       case 'play_another_song':
-        return 9_000;
+        return between(35_000, 120_000);
       case 'dance':
-        return 7_000;
+        return between(20_000, 45_000);
       default:
-        return 6_000;
+        return between(20_000, 35_000);
     }
   }
 
@@ -1903,8 +1917,8 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (task === 'use_running_machine') {
-      this.applyNpcScaleForTexture(this.man, 'man-use-object');
-      this.man.sprite.play('man-anim-use-object', true);
+      this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-running-machine', 'man-use-object'));
+      this.man.sprite.play('man-anim-running-machine', true);
       return;
     }
 
