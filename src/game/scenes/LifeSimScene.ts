@@ -1,7 +1,13 @@
 import Phaser from 'phaser';
 import houseLayout from '../../data/houseLayout.json';
 import { parsePlayerCommand } from '../sim/commandParser';
-import { runtimeContract, getWorldSizeFromContract, resolveTaskTargetCells } from '../sim/contract';
+import {
+  runtimeContract,
+  getLayoutObjectAnchor,
+  getLayoutToWorldScale,
+  getWorldSizeFromContract,
+  resolveTaskTargetCells,
+} from '../sim/contract';
 import { createNavigationGrid, findNearestWalkableCell, findPathBfs, cellToWorldCenter, pickRandomWalkableCell, worldToCell, type NavigationGrid } from '../sim/navigation';
 import { loadOrCreateIdentity, loadSnapshot, saveSnapshot } from '../sim/saveState';
 import { getComplianceChance, onCommandAccepted, onCommandRejected, tickMood } from '../sim/mood';
@@ -22,13 +28,6 @@ const DUPLICATE_REQUEST_WINDOW_MS = 9_000;
 const NPC_RENDER_Y_OFFSET = -10;
 const LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER = 64;
 const LAYOUT_OBJECT_TEXTURE_PREFIX = 'layout-object-';
-const LAYOUT_OBJECT_POSITION_OVERRIDES: Record<string, { x?: number; y?: number }> = {
-  // Fine-tuned to match the editor export preview for these assets.
-  bath_4x3_5_idle: { x: -22, y: -8 },
-  toilet_4x4_idle: { x: -18, y: -10 },
-  computerdesk_4x4_idle: { x: -52 },
-  calendar_1x1_idle: { x: -30 },
-};
 
 interface NpcRuntime {
   id: 'man' | 'dog';
@@ -101,13 +100,6 @@ interface LayoutPlacedObject {
   scale: number;
   rotation?: number;
   zIndex?: number;
-}
-
-interface TextureOpaqueBounds {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
 }
 
 function layoutObjectTextureKey(type: string): string {
@@ -199,7 +191,6 @@ export default class LifeSimScene extends Phaser.Scene {
   private preparedSpriteSheets = new Set<string>();
   private missingOptionalTextures = new Set<string>();
   private missingLayoutTextureKeys = new Set<string>();
-  private layoutTextureBounds = new Map<string, TextureOpaqueBounds | null>();
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -295,7 +286,15 @@ export default class LifeSimScene extends Phaser.Scene {
     this.identity = snapshot?.manIdentity || loadOrCreateIdentity();
     this.dayIndex = snapshot?.dayIndex || 1;
 
-    const worldSize = getWorldSizeFromContract();
+    const contractWorldSize = getWorldSizeFromContract();
+    const backgroundSource = this.textures.get('background').getSourceImage() as
+      | HTMLImageElement
+      | HTMLCanvasElement
+      | undefined;
+    const worldSize = {
+      width: Math.max(contractWorldSize.width, backgroundSource?.width ?? 0),
+      height: Math.max(contractWorldSize.height, backgroundSource?.height ?? 0),
+    };
 
     const background = this.add.image(0, 0, 'background').setOrigin(0, 0);
     background.setDisplaySize(worldSize.width, worldSize.height);
@@ -596,6 +595,9 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private renderLayoutObjects(): void {
     const layoutObjects = ((houseLayout.objects as LayoutPlacedObject[]) || []).slice();
+    const coordinateScale = getLayoutToWorldScale();
+    const objectAnchor = getLayoutObjectAnchor();
+
     layoutObjects.sort((a, b) => {
       const zA = a.zIndex ?? 0;
       const zB = b.zIndex ?? 0;
@@ -611,25 +613,13 @@ export default class LifeSimScene extends Phaser.Scene {
         return;
       }
 
-      const override = LAYOUT_OBJECT_POSITION_OVERRIDES[object.type];
-      const renderX = object.x + (override?.x ?? 0);
-      const renderY = object.y + (override?.y ?? 0);
+      const renderX = object.x * coordinateScale.x;
+      const renderY = object.y * coordinateScale.y;
+      const baseScale = typeof object.scale === 'number' ? object.scale : 1;
 
       const sprite = this.add.image(renderX, renderY, textureKey);
-      const opaque = this.getLayoutTextureOpaqueBounds(textureKey);
-      if (opaque) {
-        const frame = this.textures.get(textureKey).get(0);
-        const frameWidth = Math.max(1, frame.width);
-        const frameHeight = Math.max(1, frame.height);
-        const opaqueCenterX = (opaque.minX + opaque.maxX + 1) * 0.5;
-        const opaqueBottomY = opaque.maxY + 1;
-        sprite.setOrigin(opaqueCenterX / frameWidth, opaqueBottomY / frameHeight);
-      } else {
-        // Fallback if pixel bounds could not be determined.
-        sprite.setOrigin(0.5, 1);
-      }
-
-      sprite.setScale(typeof object.scale === 'number' ? object.scale : 1);
+      sprite.setOrigin(objectAnchor.x, objectAnchor.y);
+      sprite.setScale(baseScale * coordinateScale.x, baseScale * coordinateScale.y);
 
       if (typeof object.rotation === 'number' && object.rotation !== 0) {
         sprite.setRotation(Phaser.Math.DegToRad(object.rotation));
@@ -638,76 +628,6 @@ export default class LifeSimScene extends Phaser.Scene {
       const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 0;
       sprite.setDepth(renderY + zIndex * LAYOUT_OBJECT_DEPTH_Z_MULTIPLIER);
     });
-  }
-
-  private getLayoutTextureOpaqueBounds(textureKey: string): TextureOpaqueBounds | null {
-    if (this.layoutTextureBounds.has(textureKey)) {
-      return this.layoutTextureBounds.get(textureKey) ?? null;
-    }
-
-    const texture = this.textures.get(textureKey);
-    const frame = texture.get(0);
-    const source = texture.getSourceImage() as HTMLImageElement | HTMLCanvasElement | undefined;
-    if (!source || !frame || frame.width <= 0 || frame.height <= 0) {
-      this.layoutTextureBounds.set(textureKey, null);
-      return null;
-    }
-
-    const width = frame.width;
-    const height = frame.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) {
-      this.layoutTextureBounds.set(textureKey, null);
-      return null;
-    }
-
-    try {
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(
-        source,
-        frame.cutX,
-        frame.cutY,
-        frame.cutWidth,
-        frame.cutHeight,
-        0,
-        0,
-        width,
-        height
-      );
-      const data = ctx.getImageData(0, 0, width, height).data;
-      let minX = width;
-      let minY = height;
-      let maxX = -1;
-      let maxY = -1;
-
-      for (let y = 0; y < height; y += 1) {
-        for (let x = 0; x < width; x += 1) {
-          const alpha = data[(y * width + x) * 4 + 3];
-          if (alpha <= 2) {
-            continue;
-          }
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-
-      if (maxX < minX || maxY < minY) {
-        this.layoutTextureBounds.set(textureKey, null);
-        return null;
-      }
-
-      const bounds: TextureOpaqueBounds = { minX, maxX, minY, maxY };
-      this.layoutTextureBounds.set(textureKey, bounds);
-      return bounds;
-    } catch {
-      this.layoutTextureBounds.set(textureKey, null);
-      return null;
-    }
   }
 
   private runStartupAudit(): void {

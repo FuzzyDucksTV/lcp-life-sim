@@ -12,28 +12,63 @@ interface LayoutObject {
   scale: number;
 }
 
-function objectToCell(object: LayoutObject, gridSize: number): CellKey {
-  const col = Math.max(0, Math.floor(object.x / gridSize));
-  const row = Math.max(0, Math.floor(object.y / gridSize));
-  return toCellKey(col, row);
+interface WorldSize {
+  width: number;
+  height: number;
 }
 
-function findObjectByKeywords(keywords: string[]): LayoutObject | null {
-  const objects = (houseLayout.objects as LayoutObject[]) || [];
+interface LayoutAnchor {
+  x: number;
+  y: number;
+}
 
-  for (const object of objects) {
-    const descriptor = `${object.type} ${object.id}`.toLowerCase();
-    if (keywords.some((keyword) => descriptor.includes(keyword))) {
-      return object;
-    }
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function asPositiveNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return value;
+}
+
+function readSize(value: unknown): WorldSize | null {
+  if (!value || typeof value !== 'object') {
+    return null;
   }
 
-  return null;
+  const width = asPositiveNumber((value as { width?: unknown }).width);
+  const height = asPositiveNumber((value as { height?: unknown }).height);
+
+  if (!width || !height) {
+    return null;
+  }
+
+  return { width, height };
 }
 
-export const runtimeContract = houseRuntimeContract;
+function getLayoutCanvasSizeFromExport(): WorldSize | null {
+  const layout = houseLayout as {
+    canvas?: unknown;
+    coordinateSpace?: { canvas?: unknown };
+    navigation?: { canvas?: unknown };
+  };
 
-export function getWorldSizeFromContract(): { width: number; height: number } {
+  return (
+    readSize(layout.canvas) ??
+    readSize(layout.coordinateSpace?.canvas) ??
+    readSize(layout.navigation?.canvas) ??
+    null
+  );
+}
+
+function getRuntimeSceneSizeFromContract(): WorldSize | null {
+  const contract = runtimeContract as { scene?: unknown };
+  return readSize(contract.scene) ?? null;
+}
+
+function getWorldSizeFromMasks(): WorldSize {
   const allKeys = [
     ...runtimeContract.movement.walkMasks.lr,
     ...runtimeContract.movement.walkMasks.up,
@@ -59,6 +94,68 @@ export function getWorldSizeFromContract(): { width: number; height: number } {
     height: (maxRow + 1) * runtimeContract.gridSize,
   };
 }
+
+export function getWorldSizeFromContract(): WorldSize {
+  return getRuntimeSceneSizeFromContract() ?? getLayoutCanvasSizeFromExport() ?? getWorldSizeFromMasks();
+}
+
+export function getLayoutToWorldScale(): { x: number; y: number } {
+  const world = getWorldSizeFromContract();
+  const source = getLayoutCanvasSizeFromExport() ?? world;
+
+  return {
+    x: world.width / Math.max(1, source.width),
+    y: world.height / Math.max(1, source.height),
+  };
+}
+
+export function getLayoutObjectAnchor(): LayoutAnchor {
+  const layout = houseLayout as {
+    coordinateSpace?: {
+      objectAnchor?: { x?: unknown; y?: unknown };
+    };
+  };
+  const contract = runtimeContract as {
+    coordinateSpace?: {
+      objectAnchor?: { x?: unknown; y?: unknown };
+    };
+  };
+
+  const anchor = layout.coordinateSpace?.objectAnchor ?? contract.coordinateSpace?.objectAnchor;
+  const x = typeof anchor?.x === 'number' && Number.isFinite(anchor.x) ? clamp(anchor.x, 0, 1) : 0.5;
+  const y = typeof anchor?.y === 'number' && Number.isFinite(anchor.y) ? clamp(anchor.y, 0, 1) : 1;
+  return { x, y };
+}
+
+function projectLayoutPointToWorld(x: number, y: number): { x: number; y: number } {
+  const scale = getLayoutToWorldScale();
+  return {
+    x: x * scale.x,
+    y: y * scale.y,
+  };
+}
+
+function objectToCell(object: LayoutObject, gridSize: number): CellKey {
+  const worldPoint = projectLayoutPointToWorld(object.x, object.y);
+  const col = Math.max(0, Math.floor(worldPoint.x / gridSize));
+  const row = Math.max(0, Math.floor(worldPoint.y / gridSize));
+  return toCellKey(col, row);
+}
+
+function findObjectByKeywords(keywords: string[]): LayoutObject | null {
+  const objects = (houseLayout.objects as LayoutObject[]) || [];
+
+  for (const object of objects) {
+    const descriptor = `${object.type} ${object.id}`.toLowerCase();
+    if (keywords.some((keyword) => descriptor.includes(keyword))) {
+      return object;
+    }
+  }
+
+  return null;
+}
+
+export const runtimeContract = houseRuntimeContract;
 
 export function resolveTaskTargetCells(grid: NavigationGrid): {
   chair: CellKey | null;

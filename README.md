@@ -10,6 +10,7 @@ Current state: **Phase 6.4**
 - Dog companion movement and interaction beats
 - Delayed narrative events (letter replies, queue follow-ups, daily reflection notes)
 - Audio cues and event log UI
+- House layout object rendering aligned to editor bottom-center anchors
 
 ## Requirements
 
@@ -83,3 +84,29 @@ Examples:
 
 - Snapshot data is stored in browser localStorage under `lcp_phase6_state_v1`.
 - Includes resident identity and current day index.
+
+## Layout + Asset Pipeline
+
+This project expects editor exports from `House-Layout-Editor` and object PNGs in `public/objects`.
+
+1. Export files from the editor:
+   - `house-layout-YYYY-MM-DD.json`
+   - `house-runtime-contract-YYYY-MM-DD.ts`
+2. Replace:
+   - `src/data/houseLayout.json`
+   - `src/data/houseRuntimeContract.ts`
+3. Copy all object images into `public/objects` using the same `type` names in `houseLayout.json`:
+   - Example object type: `computerdesk_4x4_idle`
+   - Expected path: `public/objects/computerdesk_4x4_idle.png`
+4. Rebuild and run preview:
+   - `npm run build`
+   - `npm run preview`
+
+## Troubleshooting
+
+- `Failed to process file: image "man-idle-stand"`:
+  - Optional animation clip missing. The sim falls back to base animations automatically.
+- Layout object misalignment against background:
+  - Ensure the layout/runtime files came from the latest editor export.
+  - Ensure object anchor model remains bottom-center in editor and game.
+  - Ensure the correct background image is in `public/background/house-background.png`.
