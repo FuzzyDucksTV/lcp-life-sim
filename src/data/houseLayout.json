@@ -835,6 +835,24 @@
         "foreground": true
       }
     },
+    "tv_screen_quad": [
+      {
+        "x": 188.93,
+        "y": 197.87
+      },
+      {
+        "x": 259.93,
+        "y": 163.87
+      },
+      {
+        "x": 189.93,
+        "y": 251.87
+      },
+      {
+        "x": 259.93,
+        "y": 214.87
+      }
+    ],
     "door_flow": {
       "outside_duration_ms": 3000,
       "mode": "single_door_no_scene_transition"
