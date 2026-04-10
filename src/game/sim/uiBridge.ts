@@ -43,22 +43,24 @@ export class UiBridge {
   }
 
   public renderProfile(identity: ManIdentity): void {
-    const mood = identity.mood;
-    const personality = identity.personality;
+    const dogName = identity.dog?.name ?? 'the dog';
 
     this.profilePanel.innerHTML = [
-      `<h3>${identity.name}</h3>`,
-      '<p>Autonomous resident (LCP-style)</p>',
-      `<p>Personality: obedience ${personality.obedience.toFixed(2)}, playfulness ${personality.playfulness.toFixed(2)}</p>`,
-      `<p>Mood: energy ${mood.energy.toFixed(2)}, focus ${mood.focus.toFixed(2)}, irritation ${mood.irritation.toFixed(2)}</p>`,
+      `<h3>${identity.name} & ${dogName}</h3>`,
+      `<p class="backstory">${identity.backstory ?? 'A quiet resident and his faithful companion.'}</p>`,
     ].join('');
   }
 
   public pushLog(entry: CommandLogEntry): void {
+    // Hide system events from the log
+    if (entry.source === 'system') {
+      return;
+    }
+
     const row = document.createElement('div');
     row.className = `log-row ${entry.source}`;
 
-    const prefix = entry.source === 'player' ? 'You' : entry.source === 'man' ? 'Man' : 'System';
+    const prefix = entry.source === 'player' ? 'You' : 'Man';
     row.textContent = `${prefix}: ${entry.text}`;
 
     this.logPanel.prepend(row);
