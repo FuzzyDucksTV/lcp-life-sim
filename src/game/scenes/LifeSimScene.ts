@@ -2155,9 +2155,9 @@ export default class LifeSimScene extends Phaser.Scene {
       }
     }
 
-    // TV ↔ settee loop: use_tv → sit_settee (2 min) → use_tv
-    if (task.type === 'use_tv') {
-      this.hideTvVideo();
+    // TV ↔ settee loop: use_tv (turn on) → sit_settee (watch 2 min) → use_tv (turn off)
+    if (task.type === 'use_tv' && task.fromPlayerCommand !== 'tv_turn_off') {
+      // TV just turned on — keep video playing, go sit on settee to watch
       this.emitLog('man', `${this.identity.name} goes to sit on the settee.`);
       this.enqueueTask(
         { type: 'sit_settee', source: 'system', priority: 50, resumable: false, remainingMs: 120_000, fromPlayerCommand: 'tv_loop' },
@@ -2165,10 +2165,15 @@ export default class LifeSimScene extends Phaser.Scene {
       );
     }
 
+    if (task.type === 'use_tv' && task.fromPlayerCommand === 'tv_turn_off') {
+      // TV turn-off visit — stop the video
+      this.hideTvVideo();
+    }
+
     if (task.type === 'sit_settee' && task.fromPlayerCommand === 'tv_loop') {
-      this.emitLog('man', `${this.identity.name} gets up to use the TV again.`);
+      this.emitLog('man', `${this.identity.name} gets up to turn off the TV.`);
       this.enqueueTask(
-        { type: 'use_tv', source: 'system', priority: 50, resumable: false },
+        { type: 'use_tv', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'tv_turn_off' },
         true
       );
     }
@@ -3279,26 +3284,55 @@ export default class LifeSimScene extends Phaser.Scene {
   private showTvVideo(): void {
     if (this.tvVideoPlaying) return;
 
-    // Find the TV layout object to position the video on its screen
+    const coordinateScale = getLayoutToWorldScale();
+
+    // Read quad points from layout JSON (set via House-Layout-Editor)
+    const layoutNav = (houseLayout as { navigation?: { tv_screen_quad?: Array<{ x: number; y: number } | null> } }).navigation;
+    const quad = layoutNav?.tv_screen_quad;
+
+    if (quad && quad.length === 4 && quad.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
+      // Scale quad points from layout space to world space
+      const tl = { x: quad[0]!.x * coordinateScale.x, y: quad[0]!.y * coordinateScale.y };
+      const tr = { x: quad[1]!.x * coordinateScale.x, y: quad[1]!.y * coordinateScale.y };
+      const br = { x: quad[2]!.x * coordinateScale.x, y: quad[2]!.y * coordinateScale.y };
+      const bl = { x: quad[3]!.x * coordinateScale.x, y: quad[3]!.y * coordinateScale.y };
+
+      // Calculate bounding rect center and dimensions from quad
+      const centerX = (tl.x + tr.x + br.x + bl.x) / 4;
+      const centerY = (tl.y + tr.y + br.y + bl.y) / 4;
+      const screenW = Math.max(Math.abs(tr.x - tl.x), Math.abs(br.x - bl.x));
+      const screenH = Math.max(Math.abs(bl.y - tl.y), Math.abs(br.y - tr.y));
+
+      try {
+        const video = this.add.video(centerX, centerY, 'tv-movie');
+        video.setDisplaySize(screenW, screenH);
+        video.setDepth(centerY + 1);
+        video.setVolume(this.musicVolume * 0.4);
+        video.play(true);
+        this.tvVideo = video;
+        this.tvVideoPlaying = true;
+      } catch {
+        // Video playback not supported or file missing
+      }
+      return;
+    }
+
+    // Fallback: estimate screen area from TV sprite dimensions
     const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
     const tvObj = layoutObjects.find((o) => o.type.startsWith('tv_'));
     if (!tvObj) return;
 
-    const coordinateScale = getLayoutToWorldScale();
     const objectAnchor = getLayoutObjectAnchor();
     const tvRenderX = tvObj.x * coordinateScale.x;
     const tvRenderY = tvObj.y * coordinateScale.y;
     const tvScale = typeof tvObj.scale === 'number' ? tvObj.scale : 1;
 
-    // Get the TV texture to calculate screen bounds
     const textureKey = `${LAYOUT_OBJECT_TEXTURE_PREFIX}${tvObj.type}`;
     if (!this.textures.exists(textureKey)) return;
     const source = this.textures.get(textureKey).getSourceImage() as HTMLImageElement;
     const texW = source.width * tvScale * coordinateScale.x;
     const texH = source.height * tvScale * coordinateScale.y;
 
-    // The screen area is approximately the upper 55% of the TV sprite, inset ~15% from edges
-    // These proportions are tuned to match a typical pixel-art TV with a stand underneath
     const screenLeft = tvRenderX - texW * objectAnchor.x + texW * 0.12;
     const screenTop = tvRenderY - texH * objectAnchor.y + texH * 0.06;
     const screenW = texW * 0.76;
@@ -3307,9 +3341,9 @@ export default class LifeSimScene extends Phaser.Scene {
     try {
       const video = this.add.video(screenLeft + screenW / 2, screenTop + screenH / 2, 'tv-movie');
       video.setDisplaySize(screenW, screenH);
-      video.setDepth(tvRenderY + 1); // Just above the TV object
+      video.setDepth(tvRenderY + 1);
       video.setVolume(this.musicVolume * 0.4);
-      video.play(true); // loop
+      video.play(true);
       this.tvVideo = video;
       this.tvVideoPlaying = true;
     } catch {
