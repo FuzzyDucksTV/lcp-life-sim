@@ -3290,7 +3290,6 @@ export default class LifeSimScene extends Phaser.Scene {
     const layoutNav = (houseLayout as { navigation?: { tv_screen_quad?: Array<{ x: number; y: number } | null> } }).navigation;
     const quad = layoutNav?.tv_screen_quad;
 
-    console.log('[TV] quad data:', quad);
     if (quad && quad.length === 4 && quad.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
       // Scale all quad points from layout space to world space
       const pts = quad.map((p) => ({
@@ -3310,25 +3309,35 @@ export default class LifeSimScene extends Phaser.Scene {
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
 
-      console.log('[TV] Using quad path — center:', centerX, centerY, 'size:', screenW, screenH);
+      // Sort points: find left pair and right pair by x, then top/bottom by y
+      const sorted = [...pts].sort((a, b) => a.x - b.x);
+      const leftPair = sorted.slice(0, 2).sort((a, b) => a.y - b.y);
+      const rightPair = sorted.slice(2, 4).sort((a, b) => a.y - b.y);
+      const tlPt = leftPair[0];
+      const blPt = leftPair[1];
+      const trPt = rightPair[0];
+      const brPt = rightPair[1];
+
+      // Calculate skew angle from the vertical difference between left and right edges
+      const leftMidY = (tlPt.y + blPt.y) / 2;
+      const rightMidY = (trPt.y + brPt.y) / 2;
+      const skewAngle = Math.atan2(rightMidY - leftMidY, trPt.x - tlPt.x);
+
+      // Depth must be above the TV sprite
+      const tvDepth = this.findTvSpriteDepth();
+
       try {
         const video = this.add.video(centerX, centerY, 'tv-movie');
-        video.setDepth(centerY + 1);
+        video.setDepth(tvDepth + 1);
         video.setVolume(this.musicVolume * 0.4);
+        video.setRotation(skewAngle);
 
-        // Set size before and after play — Phaser can reset display size
-        // when the video metadata loads
-        video.setDisplaySize(screenW, screenH);
+        const applySize = (): void => { video.setDisplaySize(screenW, screenH); };
+        applySize();
         video.play(true);
-        video.setDisplaySize(screenW, screenH);
-
-        // Also re-apply size once the video texture is ready
-        video.on('play', () => {
-          video.setDisplaySize(screenW, screenH);
-        });
-        video.on('textureready', () => {
-          video.setDisplaySize(screenW, screenH);
-        });
+        applySize();
+        video.on('play', applySize);
+        video.on('textureready', applySize);
 
         this.tvVideo = video;
         this.tvVideoPlaying = true;
@@ -3370,6 +3379,16 @@ export default class LifeSimScene extends Phaser.Scene {
     } catch {
       // Video playback not supported or file missing
     }
+  }
+
+  private findTvSpriteDepth(): number {
+    const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
+    const tvObj = layoutObjects.find((o) => o.type.startsWith('tv_'));
+    if (!tvObj) return 500;
+    const coordinateScale = getLayoutToWorldScale();
+    const renderY = tvObj.y * coordinateScale.y;
+    const zIndex = tvObj.zIndex ?? 0;
+    return renderY + zIndex * 64;
   }
 
   private hideTvVideo(): void {
