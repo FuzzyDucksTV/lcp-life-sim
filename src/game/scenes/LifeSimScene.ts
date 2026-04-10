@@ -1043,9 +1043,10 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private applyNpcScaleForTexture(npc: NpcRuntime, textureKey: string): void {
+    const resolvedKey = this.resolveTexture(textureKey);
     const desiredHeight = npc.id === 'man' ? MAN_DESIRED_HEIGHT_PX : DOG_DESIRED_HEIGHT_PX;
     const currentScale = Math.max(0.001, npc.sprite.scaleX || 1);
-    const scale = this.getSuggestedScale(textureKey, desiredHeight, currentScale);
+    const scale = this.getSuggestedScale(resolvedKey, desiredHeight, currentScale);
     npc.sprite.setScale(scale);
   }
 
