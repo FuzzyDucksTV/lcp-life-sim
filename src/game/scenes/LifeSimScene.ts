@@ -400,7 +400,9 @@ export default class LifeSimScene extends Phaser.Scene {
   private tvVideoPlaying = false;
   private tvMesh: Phaser.GameObjects.Mesh | null = null;
   private tvCanvasTexture: Phaser.Textures.CanvasTexture | null = null;
-  private tvVideoResumeTime = 285;
+  private tvCurrentPart = 0;
+  private tvPartResumeTime = 285;
+  private tvPartCount = 9;
   private tvForgottenOffAtMs = 0;
   private currentShirtColor: ShirtColor = 'white';
   private lastBgMusicIndex = -1;
@@ -591,7 +593,9 @@ export default class LifeSimScene extends Phaser.Scene {
       }
     });
 
-    this.load.video('tv-movie', '/movies/101-Dalmatians.mp4');
+    for (let i = 1; i <= 9; i++) {
+      this.load.video(`tv-movie-${i}`, `/movies/Part_${i}.mp4`);
+    }
     this.load.image('background', '/background/house-background.png');
 
     this.load.image('man-walk-down', '/sprites/man-walking-down.png');
@@ -1695,6 +1699,14 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     if (this.man.currentTask.type === 'idle' && this.manTaskQueue.length > 0) {
+      const nextTask = this.manTaskQueue[0];
+      // If about to play piano but TV is still on, turn off TV first
+      if ((nextTask.type === 'play_piano' || nextTask.type === 'play_another_song') && this.tvVideoPlaying) {
+        this.manTaskQueue.unshift(
+          { type: 'use_tv', source: 'system', priority: nextTask.priority ?? 50, resumable: false, fromPlayerCommand: 'tv_turn_off' }
+        );
+        this.emitLog('man', `${this.identity.name} turns off the TV before heading to the piano.`);
+      }
       this.man.currentTask = this.manTaskQueue.shift() as NpcTask;
       this.man.performUntilMs = 0;
       this.man.pendingTargetCell = null;
@@ -3428,23 +3440,55 @@ export default class LifeSimScene extends Phaser.Scene {
     this.updateSfxVolume(this.sfxPiano);
   }
 
+  private getTvMovieKey(part: number): string {
+    return `tv-movie-${part + 1}`;
+  }
+
   private showTvVideo(): void {
     if (this.tvVideoPlaying) return;
+    this.playTvPart(this.tvCurrentPart, this.tvPartResumeTime);
+  }
+
+  private playTvPart(partIndex: number, seekTo: number): void {
+    // Clean up any existing video/canvas before starting new part
+    if (this.tvVideo) {
+      this.tvVideo.stop();
+      this.tvVideo.destroy();
+      this.tvVideo = null;
+    }
+    if (this.tvMesh) {
+      this.tvMesh.destroy();
+      this.tvMesh = null;
+    }
+    if (this.tvCanvasTexture) {
+      this.textures.remove('tv-canvas');
+      this.tvCanvasTexture = null;
+    }
+
+    if (partIndex >= this.tvPartCount) {
+      // Movie finished — loop back to part 0
+      partIndex = 0;
+      seekTo = 0;
+    }
+
+    const movieKey = this.getTvMovieKey(partIndex);
+    if (!this.textures.exists(movieKey) && !this.cache.video.has(movieKey)) {
+      this.tvVideoPlaying = false;
+      return;
+    }
+
+    this.tvCurrentPart = partIndex;
 
     const coordinateScale = getLayoutToWorldScale();
-
-    // Read quad points from layout JSON (set via House-Layout-Editor)
     const layoutNav = (houseLayout as { navigation?: { tv_screen_quad?: Array<{ x: number; y: number } | null> } }).navigation;
     const quad = layoutNav?.tv_screen_quad;
 
     if (quad && quad.length === 4 && quad.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
-      // Scale all quad points from layout space to world space
       const pts = quad.map((p) => ({
         x: p!.x * coordinateScale.x,
         y: p!.y * coordinateScale.y,
       }));
 
-      // Sort into TL, TR, BL, BR by position
       const sorted = [...pts].sort((a, b) => a.x - b.x);
       const leftPair = sorted.slice(0, 2).sort((a, b) => a.y - b.y);
       const rightPair = sorted.slice(2, 4).sort((a, b) => a.y - b.y);
@@ -3453,7 +3497,6 @@ export default class LifeSimScene extends Phaser.Scene {
       const tr = rightPair[0];
       const br = rightPair[1];
 
-      // Bounding box
       const xs = pts.map((p) => p.x);
       const ys = pts.map((p) => p.y);
       const minX = Math.min(...xs);
@@ -3466,25 +3509,34 @@ export default class LifeSimScene extends Phaser.Scene {
       const tvDepth = this.findTvSpriteDepth();
 
       try {
-        // Hidden video for playback + audio
-        const video = this.add.video(0, 0, 'tv-movie');
+        const video = this.add.video(0, 0, movieKey);
         video.setVisible(false);
         video.setVolume(this.musicVolume * 0.4);
-        video.play(true);
-        // Seek to saved resume position (starts at 4m45s on first play)
-        const resumeAt = this.tvVideoResumeTime;
+        video.play(false); // Don't loop — we auto-advance
+        const resumeAt = seekTo;
         video.on('play', () => {
           if (video.video && resumeAt > 0) {
             video.video.currentTime = resumeAt;
           }
         });
+        // Auto-advance to next part when this one ends
+        const advanceToNext = (): void => {
+          if (this.tvVideoPlaying && this.tvVideo === video) {
+            this.playTvPart(this.tvCurrentPart + 1, 0);
+          }
+        };
+        video.on('complete', advanceToNext);
+        // Fallback: listen on the HTML video element too
+        video.on('play', () => {
+          if (video.video) {
+            video.video.addEventListener('ended', advanceToNext, { once: true });
+          }
+        });
         this.tvVideo = video;
 
-        // Canvas texture sized to the bounding box of the quad
         const canvasTex = this.textures.createCanvas('tv-canvas', bboxW, bboxH);
         this.tvCanvasTexture = canvasTex;
 
-        // Store quad corners relative to the bounding box origin for the canvas draw
         (this as unknown as { _tvQuadLocal: { tl: { x: number; y: number }; tr: { x: number; y: number }; bl: { x: number; y: number }; br: { x: number; y: number } } })._tvQuadLocal = {
           tl: { x: tl.x - minX, y: tl.y - minY },
           tr: { x: tr.x - minX, y: tr.y - minY },
@@ -3492,7 +3544,6 @@ export default class LifeSimScene extends Phaser.Scene {
           br: { x: br.x - minX, y: br.y - minY },
         };
 
-        // Display as a regular image, positioned at bbox top-left (origin 0,0)
         const img = this.add.image(minX, minY, 'tv-canvas');
         img.setOrigin(0, 0);
         img.setDepth(tvDepth + 1);
@@ -3527,11 +3578,16 @@ export default class LifeSimScene extends Phaser.Scene {
     const screenH = texH * 0.50;
 
     try {
-      const video = this.add.video(screenLeft + screenW / 2, screenTop + screenH / 2, 'tv-movie');
+      const video = this.add.video(screenLeft + screenW / 2, screenTop + screenH / 2, movieKey);
       video.setDisplaySize(screenW, screenH);
       video.setDepth(tvRenderY + 1);
       video.setVolume(this.musicVolume * 0.4);
-      video.play(true);
+      video.play(false);
+      video.on('complete', () => {
+        if (this.tvVideoPlaying) {
+          this.playTvPart(this.tvCurrentPart + 1, 0);
+        }
+      });
       this.tvVideo = video;
       this.tvVideoPlaying = true;
     } catch {
@@ -3595,9 +3651,9 @@ export default class LifeSimScene extends Phaser.Scene {
       this.tvCanvasTexture = null;
     }
     if (this.tvVideo) {
-      // Save current playback position for next time
+      // Save current part and playback position for resume
       if (this.tvVideo.video) {
-        this.tvVideoResumeTime = this.tvVideo.video.currentTime;
+        this.tvPartResumeTime = this.tvVideo.video.currentTime;
       }
       this.tvVideo.stop();
       this.tvVideo.destroy();
