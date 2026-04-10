@@ -18,6 +18,8 @@ const VOCAB_WORDS = [
   'sofa', 'settee', 'bed', 'sleep', 'lay', 'lie', 'shower', 'bath', 'toilet', 'washing', 'washingmachine',
   'dishwasher', 'washer', 'cupboard', 'bookcase', 'worktop', 'counter', 'cooker', 'wardrobe', 'stove',
   'cook', 'read', 'turn', 'up', 'off', 'machine', 'take', 'lying', 'prince', 'like', 'watch', 'king',
+  'change', 'shirt', 'top', 'tshirt', 'color', 'colour',
+  'red', 'yellow', 'blue', 'green', 'purple', 'orange', 'white',
 ] as const;
 
 export const VOCABULARY = new Set<string>(VOCAB_WORDS);
@@ -171,6 +173,10 @@ export function inferIntent(tokens: string[]): TaskType | null {
 
   if (includesAny(tokens, ['watch', 'use']) && tokens.includes('tv')) {
     return 'use_tv';
+  }
+
+  if (tokens.includes('change') && includesAny(tokens, ['shirt', 'top', 'tshirt', 'color', 'colour'])) {
+    return 'change_shirt';
   }
 
   return null;
