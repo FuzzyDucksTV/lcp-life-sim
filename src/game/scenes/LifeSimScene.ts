@@ -372,6 +372,8 @@ export default class LifeSimScene extends Phaser.Scene {
   public musicVolume = 0.5;
   public sfxVolume = 0.5;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
+  private tvVideo: Phaser.GameObjects.Video | null = null;
+  private tvVideoPlaying = false;
   private lastBgMusicIndex = -1;
   private nextBgMusicAtMs = 0;
   private bgMusicFadingOut = false;
@@ -554,6 +556,7 @@ export default class LifeSimScene extends Phaser.Scene {
       }
     });
 
+    this.load.video('tv-movie', '/movies/101-Dalmatians.mp4');
     this.load.image('background', '/background/house-background.png');
 
     this.load.image('man-walk-down', '/sprites/man-walking-down.png');
@@ -1831,6 +1834,9 @@ export default class LifeSimScene extends Phaser.Scene {
         this.applyNpcScaleForTexture(npc, 'man-use-object');
         npc.sprite.play('man-anim-use-object', true);
       }
+      if (task === 'use_tv') {
+        this.showTvVideo();
+      }
       this.showInteractiveObjectsForTask(task);
       return;
     }
@@ -2151,6 +2157,7 @@ export default class LifeSimScene extends Phaser.Scene {
 
     // TV ↔ settee loop: use_tv → sit_settee (2 min) → use_tv
     if (task.type === 'use_tv') {
+      this.hideTvVideo();
       this.emitLog('man', `${this.identity.name} goes to sit on the settee.`);
       this.enqueueTask(
         { type: 'sit_settee', source: 'system', priority: 50, resumable: false, remainingMs: 120_000, fromPlayerCommand: 'tv_loop' },
@@ -3267,6 +3274,56 @@ export default class LifeSimScene extends Phaser.Scene {
     this.updateSfxVolume(this.sfxGameSound);
     this.updateSfxVolume(this.sfxInteraction);
     this.updateSfxVolume(this.sfxPiano);
+  }
+
+  private showTvVideo(): void {
+    if (this.tvVideoPlaying) return;
+
+    // Find the TV layout object to position the video on its screen
+    const layoutObjects = (houseLayout.objects as LayoutPlacedObject[]) || [];
+    const tvObj = layoutObjects.find((o) => o.type.startsWith('tv_'));
+    if (!tvObj) return;
+
+    const coordinateScale = getLayoutToWorldScale();
+    const objectAnchor = getLayoutObjectAnchor();
+    const tvRenderX = tvObj.x * coordinateScale.x;
+    const tvRenderY = tvObj.y * coordinateScale.y;
+    const tvScale = typeof tvObj.scale === 'number' ? tvObj.scale : 1;
+
+    // Get the TV texture to calculate screen bounds
+    const textureKey = `${LAYOUT_OBJECT_TEXTURE_PREFIX}${tvObj.type}`;
+    if (!this.textures.exists(textureKey)) return;
+    const source = this.textures.get(textureKey).getSourceImage() as HTMLImageElement;
+    const texW = source.width * tvScale * coordinateScale.x;
+    const texH = source.height * tvScale * coordinateScale.y;
+
+    // The screen area is approximately the upper 55% of the TV sprite, inset ~15% from edges
+    // These proportions are tuned to match a typical pixel-art TV with a stand underneath
+    const screenLeft = tvRenderX - texW * objectAnchor.x + texW * 0.12;
+    const screenTop = tvRenderY - texH * objectAnchor.y + texH * 0.06;
+    const screenW = texW * 0.76;
+    const screenH = texH * 0.50;
+
+    try {
+      const video = this.add.video(screenLeft + screenW / 2, screenTop + screenH / 2, 'tv-movie');
+      video.setDisplaySize(screenW, screenH);
+      video.setDepth(tvRenderY + 1); // Just above the TV object
+      video.setVolume(this.musicVolume * 0.4);
+      video.play(true); // loop
+      this.tvVideo = video;
+      this.tvVideoPlaying = true;
+    } catch {
+      // Video playback not supported or file missing
+    }
+  }
+
+  private hideTvVideo(): void {
+    if (this.tvVideo) {
+      this.tvVideo.stop();
+      this.tvVideo.destroy();
+      this.tvVideo = null;
+    }
+    this.tvVideoPlaying = false;
   }
 
   private startSleepSoundTracking(time: number): void {
