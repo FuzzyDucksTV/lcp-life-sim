@@ -118,6 +118,24 @@ audioButton.addEventListener('click', () => {
   audioButton.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
 });
 
+// Unlock audio on the very first user interaction (click/touch/key anywhere)
+const unlockAudio = (): void => {
+  audio.prime();
+  const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
+  if (runtimeScene) {
+    // Resume Phaser's sound context which is also blocked until interaction
+    if (runtimeScene.sound && runtimeScene.sound.locked) {
+      runtimeScene.sound.unlock();
+    }
+  }
+  document.removeEventListener('click', unlockAudio);
+  document.removeEventListener('touchstart', unlockAudio);
+  document.removeEventListener('keydown', unlockAudio);
+};
+document.addEventListener('click', unlockAudio);
+document.addEventListener('touchstart', unlockAudio);
+document.addEventListener('keydown', unlockAudio);
+
 // Volume sliders — apply to Phaser sound manager when scene is ready
 const applyVolumes = (): void => {
   const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
