@@ -374,6 +374,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private bgMusic: Phaser.Sound.BaseSound | null = null;
   private tvVideo: Phaser.GameObjects.Video | null = null;
   private tvVideoPlaying = false;
+  private tvMesh: Phaser.GameObjects.Mesh | null = null;
+  private tvCanvasTexture: Phaser.Textures.CanvasTexture | null = null;
   private lastBgMusicIndex = -1;
   private nextBgMusicAtMs = 0;
   private bgMusicFadingOut = false;
@@ -725,6 +727,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickIrritationRelief(time);
     this.tickSoundEffects(time);
     this.tickBackgroundMusic(time);
+    this.tickTvMesh();
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -3297,34 +3300,57 @@ export default class LifeSimScene extends Phaser.Scene {
         y: p!.y * coordinateScale.y,
       }));
 
-      // Use bounding box of all 4 points (order-independent)
-      const xs = pts.map((p) => p.x);
-      const ys = pts.map((p) => p.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      const screenW = maxX - minX;
-      const screenH = maxY - minY;
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
+      // Sort into TL, TR, BL, BR by position
+      const sorted = [...pts].sort((a, b) => a.x - b.x);
+      const leftPair = sorted.slice(0, 2).sort((a, b) => a.y - b.y);
+      const rightPair = sorted.slice(2, 4).sort((a, b) => a.y - b.y);
+      const tl = leftPair[0];
+      const bl = leftPair[1];
+      const tr = rightPair[0];
+      const br = rightPair[1];
 
-      // Depth must be above the TV sprite
+      // Center of the quad
+      const centerX = (tl.x + tr.x + bl.x + br.x) / 4;
+      const centerY = (tl.y + tr.y + bl.y + br.y) / 4;
+
       const tvDepth = this.findTvSpriteDepth();
 
       try {
-        const video = this.add.video(centerX, centerY, 'tv-movie');
-        video.setDepth(tvDepth + 1);
+        // Create a hidden video for playback + audio
+        const video = this.add.video(0, 0, 'tv-movie');
+        video.setVisible(false);
         video.setVolume(this.musicVolume * 0.4);
-
-        const applySize = (): void => { video.setDisplaySize(screenW, screenH); };
-        applySize();
         video.play(true);
-        applySize();
-        video.on('play', applySize);
-        video.on('textureready', applySize);
-
         this.tvVideo = video;
+
+        // Create a canvas texture to copy video frames into
+        const texW = 256;
+        const texH = 256;
+        const canvasTex = this.textures.createCanvas('tv-canvas', texW, texH);
+        this.tvCanvasTexture = canvasTex;
+
+        // Build a mesh with 2 triangles forming the quad
+        // Vertices are relative to the mesh position (centerX, centerY)
+        const mesh = this.add.mesh(centerX, centerY, 'tv-canvas');
+        mesh.setDepth(tvDepth + 1);
+
+        // Add vertices: positions relative to center, UV coords 0-1
+        const vTL = { x: tl.x - centerX, y: tl.y - centerY, u: 0, v: 0 };
+        const vTR = { x: tr.x - centerX, y: tr.y - centerY, u: 1, v: 0 };
+        const vBL = { x: bl.x - centerX, y: bl.y - centerY, u: 0, v: 1 };
+        const vBR = { x: br.x - centerX, y: br.y - centerY, u: 1, v: 1 };
+
+        // Two triangles: TL-TR-BL and TR-BR-BL
+        mesh.addVertices(
+          [vTL.x, vTL.y, vTR.x, vTR.y, vBL.x, vBL.y, vTR.x, vTR.y, vBR.x, vBR.y, vBL.x, vBL.y],
+          [vTL.u, vTL.v, vTR.u, vTR.v, vBL.u, vBL.v, vTR.u, vTR.v, vBR.u, vBR.v, vBL.u, vBL.v],
+        );
+
+        // Phaser Mesh uses OrthoCamera by default in 2D — set it up
+        mesh.panZ(1);
+        mesh.setPerspective(1, 1);
+
+        this.tvMesh = mesh;
         this.tvVideoPlaying = true;
       } catch {
         // Video playback not supported or file missing
@@ -3376,7 +3402,24 @@ export default class LifeSimScene extends Phaser.Scene {
     return renderY + zIndex * 64;
   }
 
+  private tickTvMesh(): void {
+    if (!this.tvMesh || !this.tvVideo || !this.tvCanvasTexture) return;
+    const htmlVideo = this.tvVideo.video;
+    if (!htmlVideo || htmlVideo.readyState < 2) return;
+    const ctx = this.tvCanvasTexture.context;
+    ctx.drawImage(htmlVideo, 0, 0, this.tvCanvasTexture.width, this.tvCanvasTexture.height);
+    this.tvCanvasTexture.refresh();
+  }
+
   private hideTvVideo(): void {
+    if (this.tvMesh) {
+      this.tvMesh.destroy();
+      this.tvMesh = null;
+    }
+    if (this.tvCanvasTexture) {
+      this.textures.remove('tv-canvas');
+      this.tvCanvasTexture = null;
+    }
     if (this.tvVideo) {
       this.tvVideo.stop();
       this.tvVideo.destroy();
