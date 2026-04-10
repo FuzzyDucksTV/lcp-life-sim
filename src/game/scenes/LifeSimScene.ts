@@ -370,6 +370,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
   private lastSfxTaskType: TaskType | null = null;
+  public musicVolume = 0.5;
+  public sfxVolume = 0.5;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
   private lastBgMusicIndex = -1;
   private nextBgMusicAtMs = 0;
@@ -2611,6 +2613,7 @@ export default class LifeSimScene extends Phaser.Scene {
       task = 'idle_stand';
     }
 
+    const lifestyle = this.identity.lifestyle;
     if (task === 'play_piano' && this.identity.personality.playfulness > 0.66 && beatRoll < 0.33) {
       task = 'dance';
     } else if (task === 'use_computer' && this.identity.personality.diligence > 0.7 && beatRoll < 0.35) {
@@ -2619,10 +2622,15 @@ export default class LifeSimScene extends Phaser.Scene {
       const canPetDog = time >= this.dogInteractionCooldownUntilMs && this.isTaskAvailable('pet_dog');
       task = weightedChoiceByRoll<TaskType>(
         [
-          { value: 'idle_stand', weight: 14 },
-          { value: 'wander', weight: 12 },
-          { value: 'sit_chair', weight: 7 },
-          { value: 'play_piano', weight: this.identity.personality.playfulness * 10 + 2 },
+          { value: 'idle_stand', weight: 10 },
+          { value: 'wander', weight: 10 },
+          { value: 'sit_chair', weight: 4 + (lifestyle?.sedentary ?? 0.3) * 10 },
+          { value: 'play_piano', weight: 2 + (lifestyle?.lovesPiano ?? 0.5) * 12 },
+          { value: 'use_computer', weight: 2 + (lifestyle?.lovesGaming ?? 0.5) * 10 },
+          { value: 'use_tv', weight: 2 + (lifestyle?.lovesTV ?? 0.3) * 10 },
+          { value: 'use_bookcase', weight: 1 + (lifestyle?.lovesReading ?? 0.3) * 8 },
+          { value: 'take_shower', weight: 1 + (lifestyle?.hygiene ?? 0.5) * 5 },
+          { value: 'use_running_machine', weight: 1 + (lifestyle?.lovesExercise ?? 0.3) * 8 },
           { value: 'pet_dog', weight: canPetDog ? 8 : 0 },
         ],
         this.getDeterministicBeatRoll(beatIndex, 3)
@@ -2871,9 +2879,11 @@ export default class LifeSimScene extends Phaser.Scene {
     // Pick a new activity when the dog finishes wandering and is idle
     if (this.dog.path.length === 0 && this.dog.currentTask.type === 'wander' && time >= this.dogActivityCooldownUntilMs) {
       const roll = Math.random();
+      const dogSleepChance = DOG_SLEEP_CHANCE + (this.identity.dog?.lovesSleep ?? 0.5) * 0.15;
+      const dogEatChance = DOG_EAT_CHANCE + (this.identity.dog?.lovesFood ?? 0.5) * 0.1;
 
       // Try to nap at anchor
-      if (roll < DOG_SLEEP_CHANCE) {
+      if (roll < dogSleepChance) {
         const sleepCell = this.getDogAnchorTargetCell('dog_sleeping');
         if (sleepCell) {
           this.dog.currentTask = { type: 'sleep' };
@@ -2893,7 +2903,7 @@ export default class LifeSimScene extends Phaser.Scene {
       }
 
       // Try to eat at anchor
-      if (roll < DOG_SLEEP_CHANCE + DOG_EAT_CHANCE && this.dogFoodSupply > 0) {
+      if (roll < dogSleepChance + dogEatChance && this.dogFoodSupply > 0) {
         const eatCell = this.getDogAnchorTargetCell('dog_eating');
         if (eatCell) {
           this.dog.currentTask = { type: 'idle' };
@@ -2956,8 +2966,9 @@ export default class LifeSimScene extends Phaser.Scene {
 
     // Default wandering behavior
     if (this.dog.path.length === 0) {
-      // Chance to idle in place before wandering again
-      if (this.dog.performUntilMs === 0 && Math.random() < 0.35) {
+      // Chance to idle in place before wandering again (lower energy dogs idle more)
+      const dogIdleChance = 0.3 + (1 - (this.identity.dog?.energy ?? 0.5)) * 0.2;
+      if (this.dog.performUntilMs === 0 && Math.random() < dogIdleChance) {
         this.dog.performUntilMs = time + Phaser.Math.Between(8_000, 25_000);
         this.playDogIdle();
         return;
@@ -3088,9 +3099,10 @@ export default class LifeSimScene extends Phaser.Scene {
 
   // ─── Sound Effects ──────────────────────────────────────────────
 
-  private playSfx(key: string, loop = false, volume = 0.5): Phaser.Sound.BaseSound | null {
+  private playSfx(key: string, loop = false, volume = 0.5, isMusic = false): Phaser.Sound.BaseSound | null {
     try {
-      const sound = this.sound.add(key, { loop, volume });
+      const scaledVolume = volume * (isMusic ? this.musicVolume : this.sfxVolume);
+      const sound = this.sound.add(key, { loop, volume: scaledVolume });
       sound.play();
       return sound;
     } catch {
@@ -3171,7 +3183,7 @@ export default class LifeSimScene extends Phaser.Scene {
           pick = (pick + 1) % PIANO_TRACK_COUNT;
         }
         this.lastPianoTrackIndex = pick;
-        this.sfxPiano = this.playSfx(`piano-${pick}`, false, 0.4);
+        this.sfxPiano = this.playSfx(`piano-${pick}`, false, 0.4, true);
       }
     } else {
       this.sfxPiano = this.stopSfx(this.sfxPiano);
@@ -3290,7 +3302,7 @@ export default class LifeSimScene extends Phaser.Scene {
         pick = (pick + 1) % LifeSimScene.BG_MUSIC_COUNT;
       }
       this.lastBgMusicIndex = pick;
-      this.bgMusic = this.playSfx(`bgm-${pick}`, false, 0.2);
+      this.bgMusic = this.playSfx(`bgm-${pick}`, false, 0.2, true);
       this.nextBgMusicAtMs = 0;
     }
   }
