@@ -57,6 +57,8 @@ function buildFeedback(intent: SimCommand['intent']): string {
       return 'I can ask him to watch TV.';
     case 'turn_off_tv':
       return 'I can ask him to turn off the TV.';
+    case 'change_shirt':
+      return 'I can ask him to change his shirt colour.';
     default:
       return 'He heard you, but not enough to assign a specific action.';
   }
