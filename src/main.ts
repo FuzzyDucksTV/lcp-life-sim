@@ -15,8 +15,8 @@ appRoot.innerHTML = `
   <main class="sim-layout">
     <section class="stage-panel">
       <header class="stage-header">
-        <h1>Little Computer People: Hidden Sim</h1>
-        <p id="sim-status">Loading simulation...</p>
+        <h1>Life Sim</h1>
+        <p id="sim-status"></p>
       </header>
       <div id="game-canvas" class="game-canvas" aria-label="Simulation canvas"></div>
     </section>
@@ -25,7 +25,6 @@ appRoot.innerHTML = `
       <section class="control-card">
         <h2>Door</h2>
         <button id="ring-bell" type="button" disabled>Ring Bell</button>
-        <p class="muted">Door flow is fixed: 3 seconds outside.</p>
       </section>
 
       <section class="control-card">
@@ -142,7 +141,7 @@ const markSceneReady = (): void => {
   sceneReady = true;
   setControlsEnabled(true);
   commandInput.focus();
-  statusLabel.textContent = 'Simulation running (hidden AI mode).';
+  statusLabel.textContent = '';
   applyVolumes();
 };
 
@@ -178,7 +177,7 @@ const tryWireSceneEvents = (): void => {
   if (!runtimeScene || !runtimeScene.events) {
     wireAttempts += 1;
     if (wireAttempts >= MAX_WIRE_ATTEMPTS) {
-      statusLabel.textContent = 'Simulation failed to initialize scene events.';
+      statusLabel.textContent = 'Failed to load. Please refresh.';
       return;
     }
     window.setTimeout(tryWireSceneEvents, 50);
