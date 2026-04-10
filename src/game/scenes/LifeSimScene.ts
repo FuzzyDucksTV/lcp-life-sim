@@ -301,6 +301,8 @@ function textForTask(task: TaskType): string {
       return 'collect the washing';
     case 'use_tv':
       return 'watch TV';
+    case 'turn_off_tv':
+      return 'turn off the TV';
     case 'door_delivery':
       return 'check the door';
     default:
@@ -369,8 +371,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
   private lastSfxTaskType: TaskType | null = null;
-  public musicVolume = 0.5;
-  public sfxVolume = 0.5;
+  public musicVolume = 1.0;
+  public sfxVolume = 1.0;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
   private tvVideo: Phaser.GameObjects.Video | null = null;
   private tvVideoPlaying = false;
@@ -1285,9 +1287,10 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     const isSecretSleep = request.intent === 'sleep' && request.normalized.includes('prince');
+    const isTurnOffTv = request.intent === 'turn_off_tv';
     const acceptedTask: NpcTask = {
-      type: isSecretSleep ? 'sleep' : request.intent,
-      fromPlayerCommand: request.normalized,
+      type: isSecretSleep ? 'sleep' : isTurnOffTv ? 'use_tv' : request.intent,
+      fromPlayerCommand: isTurnOffTv ? 'tv_turn_off' : request.normalized,
       source: 'player',
       priority: INTERRUPT_PRIORITY_PLAYER,
       resumable: true,
