@@ -362,10 +362,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private sfxStairs: Phaser.Sound.BaseSound | null = null;
   private sfxShower: Phaser.Sound.BaseSound | null = null;
   private sfxSleeping: Phaser.Sound.BaseSound | null = null;
-  private sfxSnoring: Phaser.Sound.BaseSound | null = null;
   private sfxGameSound: Phaser.Sound.BaseSound | null = null;
   private manWalkDirection: 'left' | 'right' | 'up' | 'down' | null = null;
-  private manSleepStartMs = 0;
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
   private lastSfxTaskType: TaskType | null = null;
