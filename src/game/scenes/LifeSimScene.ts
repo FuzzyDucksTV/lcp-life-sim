@@ -370,6 +370,11 @@ export default class LifeSimScene extends Phaser.Scene {
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
   private lastSfxTaskType: TaskType | null = null;
+  private bgMusic: Phaser.Sound.BaseSound | null = null;
+  private lastBgMusicIndex = -1;
+  private nextBgMusicAtMs = 0;
+  private bgMusicFadingOut = false;
+  private static readonly BG_MUSIC_COUNT = 6;
 
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
@@ -618,6 +623,14 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.audio('piano-5', '/sounds/piano/Keys-of-Sunshine.mp3');
     this.load.audio('piano-6', '/sounds/piano/Midnight-Whispered-Reflections.mp3');
     this.load.audio('piano-7', '/sounds/piano/Quiet-Evenings-at-Home.mp3');
+
+    // Background music
+    this.load.audio('bgm-0', '/sounds/music/music/compressed/Pixel-Bounce-Adventure.mp3');
+    this.load.audio('bgm-1', '/sounds/music/music/compressed/Velvet-Lantern-Lullaby.mp3');
+    this.load.audio('bgm-2', '/sounds/music/music/compressed/Whispers-of-Still-Water.mp3');
+    this.load.audio('bgm-3', '/sounds/music/music/compressed/Breathing-Between-Silences.mp3');
+    this.load.audio('bgm-4', '/sounds/music/music/compressed/Hearth-of-Pixels.mp3');
+    this.load.audio('bgm-5', '/sounds/music/music/compressed/Hearthside-Golden-Hour.mp3');
   }
 
   create(): void {
@@ -691,6 +704,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.reportMissingLayoutAssets();
     this.runStartupAudit();
     this.emitProfile();
+    this.nextBgMusicAtMs = Phaser.Math.Between(5_000, 20_000);
   }
 
   update(time: number, delta: number): void {
@@ -706,6 +720,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickHunger(deltaMs, time);
     this.tickIrritationRelief(time);
     this.tickSoundEffects(time);
+    this.tickBackgroundMusic(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -3220,6 +3235,64 @@ export default class LifeSimScene extends Phaser.Scene {
   private startSleepSoundTracking(time: number): void {
     this.alarmClockScheduled = false;
     this.nextSnoreAtMs = time + Phaser.Math.Between(5_000, 15_000);
+  }
+
+  private tickBackgroundMusic(time: number): void {
+    const task = this.man.currentTask.type;
+    const isPerforming = this.man.performUntilMs > 0;
+    const shouldDuck = isPerforming && (
+      task === 'play_piano' || task === 'play_another_song' || task === 'use_computer'
+    );
+
+    // Fade out when piano or gaming is active
+    if (shouldDuck && this.bgMusic && !this.bgMusicFadingOut) {
+      this.bgMusicFadingOut = true;
+      const webSound = this.bgMusic as Phaser.Sound.WebAudioSound;
+      if (webSound.isPlaying) {
+        this.tweens.add({
+          targets: this.bgMusic,
+          volume: 0,
+          duration: 2_000,
+          onComplete: () => {
+            this.bgMusic = this.stopSfx(this.bgMusic);
+            this.bgMusicFadingOut = false;
+          },
+        });
+      } else {
+        this.bgMusic = this.stopSfx(this.bgMusic);
+        this.bgMusicFadingOut = false;
+      }
+      return;
+    }
+
+    // While ducking activity is happening, don't start new music
+    if (shouldDuck) {
+      this.nextBgMusicAtMs = 0;
+      return;
+    }
+
+    // Schedule next track after ducking ends
+    if (this.nextBgMusicAtMs === 0 && !this.bgMusicFadingOut) {
+      this.nextBgMusicAtMs = time + Phaser.Math.Between(10_000, 40_000);
+    }
+
+    // If current track finished, schedule silence gap before next
+    if (this.bgMusic && !(this.bgMusic as Phaser.Sound.WebAudioSound).isPlaying && !this.bgMusicFadingOut) {
+      this.bgMusic.destroy();
+      this.bgMusic = null;
+      this.nextBgMusicAtMs = time + Phaser.Math.Between(15_000, 60_000);
+    }
+
+    // Start a new track when it's time
+    if (!this.bgMusic && !this.bgMusicFadingOut && this.nextBgMusicAtMs > 0 && time >= this.nextBgMusicAtMs) {
+      let pick = Math.floor(Math.random() * LifeSimScene.BG_MUSIC_COUNT);
+      if (pick === this.lastBgMusicIndex) {
+        pick = (pick + 1) % LifeSimScene.BG_MUSIC_COUNT;
+      }
+      this.lastBgMusicIndex = pick;
+      this.bgMusic = this.playSfx(`bgm-${pick}`, false, 0.2);
+      this.nextBgMusicAtMs = 0;
+    }
   }
 
   private applyOcclusionVisibility(npc: NpcRuntime): void {
