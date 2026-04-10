@@ -357,6 +357,19 @@ export default class LifeSimScene extends Phaser.Scene {
   private hungerCookingQueued = false;
   private irritationReliefQueued = false;
 
+  // Sound effect state
+  private sfxWalking: Phaser.Sound.BaseSound | null = null;
+  private sfxStairs: Phaser.Sound.BaseSound | null = null;
+  private sfxShower: Phaser.Sound.BaseSound | null = null;
+  private sfxSleeping: Phaser.Sound.BaseSound | null = null;
+  private sfxSnoring: Phaser.Sound.BaseSound | null = null;
+  private sfxGameSound: Phaser.Sound.BaseSound | null = null;
+  private manWalkDirection: 'left' | 'right' | 'up' | 'down' | null = null;
+  private manSleepStartMs = 0;
+  private alarmClockScheduled = false;
+  private nextSnoreAtMs = 0;
+  private lastSfxTaskType: TaskType | null = null;
+
   private readonly routineBeats: readonly RoutineBeat[] = [
     { startRatio: 0, endRatio: 0.1, label: 'wake and orient', task: 'idle_stand' },
     { startRatio: 0.1, endRatio: 0.23, label: 'morning movement', task: 'use_running_machine' },
@@ -572,6 +585,28 @@ export default class LifeSimScene extends Phaser.Scene {
     objectTypes.forEach((type) => {
       this.load.image(layoutObjectTextureKey(type), `/objects/${type}.png`);
     });
+
+    // Sound effects
+    this.load.audio('sfx-alarmclock', '/sounds/soundeffects/alarmclock.ogg');
+    this.load.audio('sfx-cooker', '/sounds/soundeffects/cooker.ogg');
+    this.load.audio('sfx-cupboard', '/sounds/soundeffects/cupboard.ogg');
+    this.load.audio('sfx-dishwasher', '/sounds/soundeffects/dishwasher.ogg');
+    this.load.audio('sfx-dogbark', '/sounds/soundeffects/dogbark.ogg');
+    this.load.audio('sfx-doorbell', '/sounds/soundeffects/doorbell.ogg');
+    this.load.audio('sfx-foodchopping', '/sounds/soundeffects/foodchopping.ogg');
+    this.load.audio('sfx-fridge', '/sounds/soundeffects/fridge.ogg');
+    this.load.audio('sfx-glassknock', '/sounds/soundeffects/glassknock.ogg');
+    this.load.audio('sfx-keyboardtyping', '/sounds/soundeffects/keyboardtyping.ogg');
+    this.load.audio('sfx-shower', '/sounds/soundeffects/shower.ogg');
+    this.load.audio('sfx-sleeping', '/sounds/soundeffects/sleeping.ogg');
+    this.load.audio('sfx-snoring', '/sounds/soundeffects/snoring.ogg');
+    this.load.audio('sfx-stairs', '/sounds/soundeffects/stairs.ogg');
+    this.load.audio('sfx-toilet', '/sounds/soundeffects/toilet.ogg');
+    this.load.audio('sfx-walking', '/sounds/soundeffects/walking.ogg');
+    this.load.audio('sfx-wardrobe', '/sounds/soundeffects/wardrobe.ogg');
+    this.load.audio('sfx-washingmachine', '/sounds/soundeffects/washingmachine.ogg');
+    this.load.audio('sfx-gamesound', '/sounds/soundeffects/gamesound.mp3');
+    this.load.audio('sfx-gamesoundpacman', '/sounds/soundeffects/gamesoundpacman.mp3');
   }
 
   create(): void {
@@ -659,6 +694,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickWashingCollect(time);
     this.tickHunger(deltaMs, time);
     this.tickIrritationRelief(time);
+    this.tickSoundEffects(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -692,6 +728,8 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitLog('player', 'Please come to the door.');
     this.emitLog('man', `${this.identity.name} heard the bell and will check the door.`);
     this.emitAudioCue('bell');
+    this.playSfx('sfx-doorbell', false, 0.6);
+    this.time.delayedCall(2_000, () => { this.playSfx('sfx-dogbark', false, 0.5); });
     const reactionPlayed = this.triggerManReaction('nod', MAN_REACTION_BELL_MS);
     const enqueueDoorTask = (): void => {
       this.requestPriorityTask(
@@ -1633,6 +1671,7 @@ export default class LifeSimScene extends Phaser.Scene {
         npc.performUntilMs = time + this.resolveTaskDuration(npc.currentTask);
         this.applyNpcScaleForTexture(npc, 'man-walk-down');
         npc.sprite.play('man-anim-sleep', true);
+        this.startSleepSoundTracking(time);
       }
       if (bedAnchor) {
         npc.sprite.setPosition(bedAnchor.x, this.toRenderY(bedAnchor.y, npc.id));
@@ -1984,6 +2023,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.man.performUntilMs = 0;
     this.man.pendingTargetCell = null;
     this.man.path = [];
+    this.manWalkDirection = null;
     this.playManIdle();
   }
 
@@ -2043,6 +2083,10 @@ export default class LifeSimScene extends Phaser.Scene {
         { type: 'use_dishwasher', source: 'system', priority: 50, resumable: false, remainingMs: 10_000 },
         true
       );
+    }
+
+    if (task.type === 'use_toilet') {
+      this.playSfx('sfx-toilet', false, 0.4);
     }
 
     if (task.type === 'open_kitchen_cupboard') {
@@ -2143,6 +2187,9 @@ export default class LifeSimScene extends Phaser.Scene {
 
     const direction = getDirection(dx, dy);
     this.playWalkAnimation(npc, direction, time);
+    if (npc.id === 'man') {
+      this.manWalkDirection = direction;
+    }
 
     return false;
   }
@@ -2210,6 +2257,7 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private playManIdle(): void {
+    this.manWalkDirection = null;
     this.applyNpcScaleForTexture(this.man, this.resolveTexture('man-idle-stand', 'man-walk-down'));
     this.man.sprite.play('man-anim-idle-stand', true);
     this.pauseCurrentAnimation(this.man.sprite);
@@ -2724,6 +2772,7 @@ export default class LifeSimScene extends Phaser.Scene {
     if (triggered) {
       this.emitLog('man', prompt);
       this.emitAudioCue('positive');
+      this.playSfx('sfx-glassknock', false, 0.5);
     }
 
     this.nextAttentionKnockAtMs = time + Phaser.Math.Between(ATTENTION_KNOCK_INTERVAL_MIN_MS, ATTENTION_KNOCK_INTERVAL_MAX_MS);
@@ -3009,6 +3058,138 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     return null;
+  }
+
+  // ─── Sound Effects ──────────────────────────────────────────────
+
+  private playSfx(key: string, loop = false, volume = 0.5): Phaser.Sound.BaseSound | null {
+    try {
+      const sound = this.sound.add(key, { loop, volume });
+      sound.play();
+      return sound;
+    } catch {
+      return null;
+    }
+  }
+
+  private stopSfx(sound: Phaser.Sound.BaseSound | null): null {
+    if (sound && (sound as Phaser.Sound.WebAudioSound).isPlaying) {
+      sound.stop();
+      sound.destroy();
+    }
+    return null;
+  }
+
+  private tickSoundEffects(time: number): void {
+    const task = this.man.currentTask.type;
+    const isPerforming = this.man.performUntilMs > 0;
+
+    // Walking sound: plays while man moves left/right
+    if (this.man.path.length > 0 && this.manWalkDirection !== null) {
+      if (this.manWalkDirection === 'left' || this.manWalkDirection === 'right') {
+        if (!this.sfxWalking || !(this.sfxWalking as Phaser.Sound.WebAudioSound).isPlaying) {
+          this.sfxWalking = this.playSfx('sfx-walking', true, 0.3);
+        }
+        this.sfxStairs = this.stopSfx(this.sfxStairs);
+      } else if (this.manWalkDirection === 'up' || this.manWalkDirection === 'down') {
+        // Stairs sound: plays while man walks up/down
+        if (!this.sfxStairs || !(this.sfxStairs as Phaser.Sound.WebAudioSound).isPlaying) {
+          this.sfxStairs = this.playSfx('sfx-stairs', true, 0.35);
+        }
+        this.sfxWalking = this.stopSfx(this.sfxWalking);
+      }
+    } else {
+      this.sfxWalking = this.stopSfx(this.sfxWalking);
+      this.sfxStairs = this.stopSfx(this.sfxStairs);
+    }
+
+    // Shower sound: loops while man is showering
+    if (task === 'take_shower' && isPerforming) {
+      if (!this.sfxShower || !(this.sfxShower as Phaser.Sound.WebAudioSound).isPlaying) {
+        this.sfxShower = this.playSfx('sfx-shower', true, 0.4);
+      }
+    } else {
+      this.sfxShower = this.stopSfx(this.sfxShower);
+    }
+
+    // Sleeping sound: loops while man is sleeping; random snoring
+    if ((task === 'sleep' || task === 'lay_bed') && isPerforming) {
+      if (!this.sfxSleeping || !(this.sfxSleeping as Phaser.Sound.WebAudioSound).isPlaying) {
+        this.sfxSleeping = this.playSfx('sfx-sleeping', true, 0.3);
+      }
+      // Random snoring
+      if (time >= this.nextSnoreAtMs) {
+        this.playSfx('sfx-snoring', false, 0.25);
+        this.nextSnoreAtMs = time + Phaser.Math.Between(8_000, 20_000);
+      }
+      // Alarm clock 2 seconds before waking
+      if (!this.alarmClockScheduled && this.man.performUntilMs > 0 && this.man.performUntilMs - time <= 2_000) {
+        this.alarmClockScheduled = true;
+        this.playSfx('sfx-alarmclock', false, 0.6);
+      }
+    } else {
+      this.sfxSleeping = this.stopSfx(this.sfxSleeping);
+      if (task !== 'sleep' && task !== 'lay_bed') {
+        this.alarmClockScheduled = false;
+        this.nextSnoreAtMs = 0;
+      }
+    }
+
+    // Game sound: plays while man uses computer (not typing a letter)
+    if ((task === 'use_computer') && isPerforming) {
+      if (!this.sfxGameSound || !(this.sfxGameSound as Phaser.Sound.WebAudioSound).isPlaying) {
+        // Randomly pick between gamesound and gamesoundpacman
+        const gameKey = Math.random() < 0.5 ? 'sfx-gamesound' : 'sfx-gamesoundpacman';
+        this.sfxGameSound = this.playSfx(gameKey, true, 0.25);
+      }
+    } else {
+      this.sfxGameSound = this.stopSfx(this.sfxGameSound);
+    }
+
+    // Keyboard typing: plays while man types a letter or uses computer (not game — but use_computer IS game)
+    // Actually per user spec: keyboardtyping triggers when man types a letter OR when using computer and not playing a game
+    // Since use_computer is game play, keyboardtyping only applies to type_letter
+    // But the user also said it triggers when "the man types a letter" — so we treat type_letter as keyboard typing
+    if (task === 'type_letter' && isPerforming) {
+      if (this.lastSfxTaskType !== 'type_letter') {
+        this.playSfx('sfx-keyboardtyping', false, 0.35);
+      }
+    }
+
+    // One-shot sound triggers when starting a new task performance
+    if (isPerforming && this.lastSfxTaskType !== task) {
+      switch (task) {
+        case 'use_cooker':
+          this.playSfx('sfx-cooker', false, 0.5);
+          break;
+        case 'open_kitchen_cupboard':
+          this.playSfx('sfx-cupboard', false, 0.5);
+          break;
+        case 'use_dishwasher':
+          this.playSfx('sfx-dishwasher', false, 0.5);
+          break;
+        case 'use_kitchen_worktop':
+          this.playSfx('sfx-foodchopping', false, 0.5);
+          break;
+        case 'use_fridge':
+          this.playSfx('sfx-fridge', false, 0.5);
+          break;
+        case 'use_wardrobe':
+          this.playSfx('sfx-wardrobe', false, 0.5);
+          break;
+        case 'use_washing_machine':
+          this.playSfx('sfx-washingmachine', false, 0.5);
+          break;
+      }
+    }
+
+    this.lastSfxTaskType = isPerforming ? task : null;
+  }
+
+  private startSleepSoundTracking(time: number): void {
+    this.manSleepStartMs = time;
+    this.alarmClockScheduled = false;
+    this.nextSnoreAtMs = time + Phaser.Math.Between(5_000, 15_000);
   }
 
   private applyOcclusionVisibility(npc: NpcRuntime): void {
