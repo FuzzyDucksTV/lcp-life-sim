@@ -3309,20 +3309,6 @@ export default class LifeSimScene extends Phaser.Scene {
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
 
-      // Sort points: find left pair and right pair by x, then top/bottom by y
-      const sorted = [...pts].sort((a, b) => a.x - b.x);
-      const leftPair = sorted.slice(0, 2).sort((a, b) => a.y - b.y);
-      const rightPair = sorted.slice(2, 4).sort((a, b) => a.y - b.y);
-      const tlPt = leftPair[0];
-      const blPt = leftPair[1];
-      const trPt = rightPair[0];
-      const brPt = rightPair[1];
-
-      // Calculate skew angle from the vertical difference between left and right edges
-      const leftMidY = (tlPt.y + blPt.y) / 2;
-      const rightMidY = (trPt.y + brPt.y) / 2;
-      const skewAngle = Math.atan2(rightMidY - leftMidY, trPt.x - tlPt.x);
-
       // Depth must be above the TV sprite
       const tvDepth = this.findTvSpriteDepth();
 
@@ -3330,7 +3316,6 @@ export default class LifeSimScene extends Phaser.Scene {
         const video = this.add.video(centerX, centerY, 'tv-movie');
         video.setDepth(tvDepth + 1);
         video.setVolume(this.musicVolume * 0.4);
-        video.setRotation(skewAngle);
 
         const applySize = (): void => { video.setDisplaySize(screenW, screenH); };
         applySize();
