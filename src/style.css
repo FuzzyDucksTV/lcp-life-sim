@@ -38,6 +38,50 @@ body {
   padding: 14px;
 }
 
+.start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(116, 192, 252, 0.15), transparent 70%),
+    linear-gradient(165deg, var(--bg-0), var(--bg-1) 46%, var(--bg-2));
+}
+
+.start-overlay-content {
+  text-align: center;
+}
+
+.start-overlay-content h1 {
+  font-size: 2.4rem;
+  margin: 0 0 28px;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+#start-button {
+  padding: 16px 44px;
+  font-size: 1.1rem;
+  font-weight: 500;
+  background: linear-gradient(180deg, #584016, #3e2d0f);
+  border: 1px solid rgba(242, 185, 74, 0.5);
+  border-radius: 14px;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color 200ms ease, transform 150ms ease;
+}
+
+#start-button:hover {
+  background: linear-gradient(180deg, #6e5020, #4a3513);
+  transform: translateY(-2px);
+}
+
+#start-button:active {
+  transform: translateY(0);
+}
+
 .sim-layout {
   display: grid;
   grid-template-columns: minmax(580px, 1fr) 360px;
