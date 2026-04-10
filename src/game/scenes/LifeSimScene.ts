@@ -3107,6 +3107,9 @@ export default class LifeSimScene extends Phaser.Scene {
     try {
       const scaledVolume = volume * (isMusic ? this.musicVolume : this.sfxVolume);
       const sound = this.sound.add(key, { loop, volume: scaledVolume });
+      // Store base volume and category so we can rescale when sliders change
+      (sound as unknown as { _baseVol: number; _isMusic: boolean })._baseVol = volume;
+      (sound as unknown as { _baseVol: number; _isMusic: boolean })._isMusic = isMusic;
       sound.play();
       return sound;
     } catch {
@@ -3120,6 +3123,15 @@ export default class LifeSimScene extends Phaser.Scene {
       sound.destroy();
     }
     return null;
+  }
+
+  private updateSfxVolume(sound: Phaser.Sound.BaseSound | null): void {
+    if (!sound) return;
+    const meta = sound as unknown as { _baseVol?: number; _isMusic?: boolean };
+    const base = meta._baseVol ?? 0.5;
+    const isMusic = meta._isMusic ?? false;
+    const scaled = base * (isMusic ? this.musicVolume : this.sfxVolume);
+    (sound as Phaser.Sound.WebAudioSound).setVolume(scaled);
   }
 
   private tickSoundEffects(time: number): void {
@@ -3246,6 +3258,15 @@ export default class LifeSimScene extends Phaser.Scene {
     }
 
     this.lastSfxTaskType = isPerforming ? task : null;
+
+    // Update volumes on all active looping sounds in real-time
+    this.updateSfxVolume(this.sfxWalking);
+    this.updateSfxVolume(this.sfxStairs);
+    this.updateSfxVolume(this.sfxShower);
+    this.updateSfxVolume(this.sfxSleeping);
+    this.updateSfxVolume(this.sfxGameSound);
+    this.updateSfxVolume(this.sfxInteraction);
+    this.updateSfxVolume(this.sfxPiano);
   }
 
   private startSleepSoundTracking(time: number): void {
@@ -3309,6 +3330,9 @@ export default class LifeSimScene extends Phaser.Scene {
       this.bgMusic = this.playSfx(`bgm-${pick}`, false, 0.2, true);
       this.nextBgMusicAtMs = 0;
     }
+
+    // Keep background music volume in sync with slider
+    this.updateSfxVolume(this.bgMusic);
   }
 
   private applyOcclusionVisibility(npc: NpcRuntime): void {
