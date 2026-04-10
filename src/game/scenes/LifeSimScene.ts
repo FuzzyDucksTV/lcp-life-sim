@@ -376,6 +376,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private tvVideoPlaying = false;
   private tvMesh: Phaser.GameObjects.Mesh | null = null;
   private tvCanvasTexture: Phaser.Textures.CanvasTexture | null = null;
+  private tvVideoResumeTime = 285;
+  private tvForgottenOffAtMs = 0;
   private lastBgMusicIndex = -1;
   private nextBgMusicAtMs = 0;
   private bgMusicFadingOut = false;
@@ -728,6 +730,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.tickSoundEffects(time);
     this.tickBackgroundMusic(time);
     this.tickTvMesh();
+    this.tickTvForgotten(time);
 
     this.identity.mood = tickMood(this.identity.mood, deltaMs, this.man.currentTask.type);
 
@@ -1909,7 +1912,7 @@ export default class LifeSimScene extends Phaser.Scene {
       case 'collect_washing':
         return between(8_000, 12_000);
       case 'use_tv':
-        return between(8_000, 15_000);
+        return 1_000;
       default:
         return between(20_000, 35_000);
     }
@@ -2163,7 +2166,7 @@ export default class LifeSimScene extends Phaser.Scene {
       // TV just turned on — keep video playing, go sit on settee to watch
       this.emitLog('man', `${this.identity.name} goes to sit on the settee.`);
       this.enqueueTask(
-        { type: 'sit_settee', source: 'system', priority: 50, resumable: false, remainingMs: 120_000, fromPlayerCommand: 'tv_loop' },
+        { type: 'sit_settee', source: 'system', priority: 50, resumable: true, remainingMs: Phaser.Math.Between(180_000, 300_000), fromPlayerCommand: 'tv_loop' },
         true
       );
     }
@@ -2171,14 +2174,21 @@ export default class LifeSimScene extends Phaser.Scene {
     if (task.type === 'use_tv' && task.fromPlayerCommand === 'tv_turn_off') {
       // TV turn-off visit — stop the video
       this.hideTvVideo();
+      this.tvForgottenOffAtMs = 0;
     }
 
     if (task.type === 'sit_settee' && task.fromPlayerCommand === 'tv_loop') {
-      this.emitLog('man', `${this.identity.name} gets up to turn off the TV.`);
-      this.enqueueTask(
-        { type: 'use_tv', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'tv_turn_off' },
-        true
-      );
+      const forgetsToTurnOff = Math.random() < 0.3;
+      if (forgetsToTurnOff) {
+        this.emitLog('man', `${this.identity.name} gets up and wanders off, leaving the TV on.`);
+        this.tvForgottenOffAtMs = this.time.now + 300_000;
+      } else {
+        this.emitLog('man', `${this.identity.name} gets up to turn off the TV.`);
+        this.enqueueTask(
+          { type: 'use_tv', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'tv_turn_off' },
+          true
+        );
+      }
     }
 
     if (task.type === 'use_washing_machine') {
@@ -3327,6 +3337,13 @@ export default class LifeSimScene extends Phaser.Scene {
         video.setVisible(false);
         video.setVolume(this.musicVolume * 0.4);
         video.play(true);
+        // Seek to saved resume position (starts at 4m45s on first play)
+        const resumeAt = this.tvVideoResumeTime;
+        video.on('play', () => {
+          if (video.video && resumeAt > 0) {
+            video.video.currentTime = resumeAt;
+          }
+        });
         this.tvVideo = video;
 
         // Canvas texture sized to the bounding box of the quad
@@ -3444,11 +3461,28 @@ export default class LifeSimScene extends Phaser.Scene {
       this.tvCanvasTexture = null;
     }
     if (this.tvVideo) {
+      // Save current playback position for next time
+      if (this.tvVideo.video) {
+        this.tvVideoResumeTime = this.tvVideo.video.currentTime;
+      }
       this.tvVideo.stop();
       this.tvVideo.destroy();
       this.tvVideo = null;
     }
     this.tvVideoPlaying = false;
+  }
+
+  private tickTvForgotten(time: number): void {
+    if (this.tvForgottenOffAtMs > 0 && time >= this.tvForgottenOffAtMs) {
+      this.tvForgottenOffAtMs = 0;
+      if (this.tvVideoPlaying) {
+        this.emitLog('man', `${this.identity.name} remembers the TV is still on and goes to turn it off.`);
+        this.enqueueTask(
+          { type: 'use_tv', source: 'system', priority: 50, resumable: false, fromPlayerCommand: 'tv_turn_off' },
+          true
+        );
+      }
+    }
   }
 
   private startSleepSoundTracking(time: number): void {
@@ -3461,7 +3495,7 @@ export default class LifeSimScene extends Phaser.Scene {
     const isPerforming = this.man.performUntilMs > 0;
     const shouldDuck = isPerforming && (
       task === 'play_piano' || task === 'play_another_song' || task === 'use_computer'
-    );
+    ) || this.tvVideoPlaying;
 
     // Fade out when piano or gaming is active
     if (shouldDuck && this.bgMusic && !this.bgMusicFadingOut) {
