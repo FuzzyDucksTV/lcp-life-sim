@@ -12,7 +12,13 @@ if (!appRoot) {
 }
 
 appRoot.innerHTML = `
-  <main class="sim-layout">
+  <div id="start-overlay" class="start-overlay">
+    <div class="start-overlay-content">
+      <h1>Life Sim</h1>
+      <button id="start-button" type="button">Let the sim begin</button>
+    </div>
+  </div>
+  <main class="sim-layout" style="display:none">
     <section class="stage-panel">
       <header class="stage-header">
         <h1>Life Sim</h1>
@@ -118,23 +124,22 @@ audioButton.addEventListener('click', () => {
   audioButton.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
 });
 
-// Unlock audio on the very first user interaction (click/touch/key anywhere)
-const unlockAudio = (): void => {
-  audio.prime();
-  const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
-  if (runtimeScene) {
-    // Resume Phaser's sound context which is also blocked until interaction
-    if (runtimeScene.sound && runtimeScene.sound.locked) {
+// Start overlay — unlocks audio and reveals the game
+const startOverlay = document.querySelector<HTMLDivElement>('#start-overlay');
+const startButton = document.querySelector<HTMLButtonElement>('#start-button');
+const simLayout = document.querySelector<HTMLElement>('.sim-layout');
+
+if (startButton && startOverlay && simLayout) {
+  startButton.addEventListener('click', () => {
+    audio.prime();
+    const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
+    if (runtimeScene && runtimeScene.sound && runtimeScene.sound.locked) {
       runtimeScene.sound.unlock();
     }
-  }
-  document.removeEventListener('click', unlockAudio);
-  document.removeEventListener('touchstart', unlockAudio);
-  document.removeEventListener('keydown', unlockAudio);
-};
-document.addEventListener('click', unlockAudio);
-document.addEventListener('touchstart', unlockAudio);
-document.addEventListener('keydown', unlockAudio);
+    startOverlay.style.display = 'none';
+    simLayout.style.display = '';
+  });
+}
 
 // Volume sliders — apply to Phaser sound manager when scene is ready
 const applyVolumes = (): void => {
