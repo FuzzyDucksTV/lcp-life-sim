@@ -56,11 +56,11 @@ appRoot.innerHTML = `
         <button id="audio-toggle" type="button">Audio: ON</button>
         <div class="volume-control">
           <label for="music-volume">Music</label>
-          <input id="music-volume" type="range" min="0" max="100" value="50" />
+          <input id="music-volume" type="range" min="0" max="100" value="100" />
         </div>
         <div class="volume-control">
           <label for="sfx-volume">Sound Effects</label>
-          <input id="sfx-volume" type="range" min="0" max="100" value="50" />
+          <input id="sfx-volume" type="range" min="0" max="100" value="100" />
         </div>
       </section>
 

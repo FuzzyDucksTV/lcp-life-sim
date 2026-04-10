@@ -55,6 +55,8 @@ function buildFeedback(intent: SimCommand['intent']): string {
       return 'I can ask him to sleep.';
     case 'use_tv':
       return 'I can ask him to watch TV.';
+    case 'turn_off_tv':
+      return 'I can ask him to turn off the TV.';
     default:
       return 'He heard you, but not enough to assign a specific action.';
   }

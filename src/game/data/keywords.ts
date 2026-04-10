@@ -17,7 +17,7 @@ const VOCAB_WORDS = [
   'machine', 'runningmachine', 'computerdesk', 'desk', 'sit', 'down', 'at', 'a', 'to', 'me', 'the', 'another', 'song',
   'sofa', 'settee', 'bed', 'sleep', 'lay', 'lie', 'shower', 'bath', 'toilet', 'washing', 'washingmachine',
   'dishwasher', 'washer', 'cupboard', 'bookcase', 'worktop', 'counter', 'cooker', 'wardrobe', 'stove',
-  'cook', 'read', 'turn', 'up', 'machine', 'take', 'lying', 'prince', 'like', 'watch', 'king',
+  'cook', 'read', 'turn', 'up', 'off', 'machine', 'take', 'lying', 'prince', 'like', 'watch', 'king',
 ] as const;
 
 export const VOCABULARY = new Set<string>(VOCAB_WORDS);
@@ -163,6 +163,10 @@ export function inferIntent(tokens: string[]): TaskType | null {
 
   if (includesAll(tokens, ['play', 'another', 'song']) || includesAll(tokens, ['play', 'another', 'tune'])) {
     return 'play_another_song';
+  }
+
+  if (includesAll(tokens, ['turn', 'off']) && tokens.includes('tv')) {
+    return 'turn_off_tv';
   }
 
   if (includesAny(tokens, ['watch', 'use']) && tokens.includes('tv')) {
