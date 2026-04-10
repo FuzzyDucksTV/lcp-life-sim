@@ -3291,17 +3291,23 @@ export default class LifeSimScene extends Phaser.Scene {
     const quad = layoutNav?.tv_screen_quad;
 
     if (quad && quad.length === 4 && quad.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
-      // Scale quad points from layout space to world space
-      const tl = { x: quad[0]!.x * coordinateScale.x, y: quad[0]!.y * coordinateScale.y };
-      const tr = { x: quad[1]!.x * coordinateScale.x, y: quad[1]!.y * coordinateScale.y };
-      const br = { x: quad[2]!.x * coordinateScale.x, y: quad[2]!.y * coordinateScale.y };
-      const bl = { x: quad[3]!.x * coordinateScale.x, y: quad[3]!.y * coordinateScale.y };
+      // Scale all quad points from layout space to world space
+      const pts = quad.map((p) => ({
+        x: p!.x * coordinateScale.x,
+        y: p!.y * coordinateScale.y,
+      }));
 
-      // Calculate bounding rect center and dimensions from quad
-      const centerX = (tl.x + tr.x + br.x + bl.x) / 4;
-      const centerY = (tl.y + tr.y + br.y + bl.y) / 4;
-      const screenW = Math.max(Math.abs(tr.x - tl.x), Math.abs(br.x - bl.x));
-      const screenH = Math.max(Math.abs(bl.y - tl.y), Math.abs(br.y - tr.y));
+      // Use bounding box of all 4 points (order-independent)
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const screenW = maxX - minX;
+      const screenH = maxY - minY;
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
 
       try {
         const video = this.add.video(centerX, centerY, 'tv-movie');
