@@ -364,6 +364,8 @@ export default class LifeSimScene extends Phaser.Scene {
   private sfxSleeping: Phaser.Sound.BaseSound | null = null;
   private sfxGameSound: Phaser.Sound.BaseSound | null = null;
   private sfxInteraction: Phaser.Sound.BaseSound | null = null;
+  private sfxPiano: Phaser.Sound.BaseSound | null = null;
+  private lastPianoTrackIndex = -1;
   private manWalkDirection: 'left' | 'right' | 'up' | 'down' | null = null;
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
@@ -606,6 +608,16 @@ export default class LifeSimScene extends Phaser.Scene {
     this.load.audio('sfx-washingmachine', '/sounds/soundeffects/washingmachine.ogg');
     this.load.audio('sfx-gamesound', '/sounds/soundeffects/gamesound.mp3');
     this.load.audio('sfx-gamesoundpacman', '/sounds/soundeffects/gamesoundpacman.mp3');
+
+    // Piano tunes
+    this.load.audio('piano-0', '/sounds/piano/Quiet-Keys-at-Dusk.mp3');
+    this.load.audio('piano-1', '/sounds/piano/Shadows-of-the-Keys.mp3');
+    this.load.audio('piano-2', '/sounds/piano/Sunshine-Keys.mp3');
+    this.load.audio('piano-3', '/sounds/piano/Tiny-Dancing-Questions.mp3');
+    this.load.audio('piano-4', '/sounds/piano/Tipsy-Keys-at-Home.mp3');
+    this.load.audio('piano-5', '/sounds/piano/Keys-of-Sunshine.mp3');
+    this.load.audio('piano-6', '/sounds/piano/Midnight-Whispered-Reflections.mp3');
+    this.load.audio('piano-7', '/sounds/piano/Quiet-Evenings-at-Home.mp3');
   }
 
   create(): void {
@@ -3132,6 +3144,22 @@ export default class LifeSimScene extends Phaser.Scene {
         this.alarmClockScheduled = false;
         this.nextSnoreAtMs = 0;
       }
+    }
+
+    // Piano sound: plays while man plays piano, stops when he leaves
+    const isPianoTask = (task === 'play_piano' || task === 'play_another_song') && isPerforming;
+    if (isPianoTask) {
+      if (!this.sfxPiano || !(this.sfxPiano as Phaser.Sound.WebAudioSound).isPlaying) {
+        const PIANO_TRACK_COUNT = 8;
+        let pick = Math.floor(Math.random() * PIANO_TRACK_COUNT);
+        if (pick === this.lastPianoTrackIndex) {
+          pick = (pick + 1) % PIANO_TRACK_COUNT;
+        }
+        this.lastPianoTrackIndex = pick;
+        this.sfxPiano = this.playSfx(`piano-${pick}`, false, 0.4);
+      }
+    } else {
+      this.sfxPiano = this.stopSfx(this.sfxPiano);
     }
 
     // Game sound: plays while man uses computer (not typing a letter)
