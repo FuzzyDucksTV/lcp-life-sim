@@ -3290,6 +3290,7 @@ export default class LifeSimScene extends Phaser.Scene {
     const layoutNav = (houseLayout as { navigation?: { tv_screen_quad?: Array<{ x: number; y: number } | null> } }).navigation;
     const quad = layoutNav?.tv_screen_quad;
 
+    console.log('[TV] quad data:', quad);
     if (quad && quad.length === 4 && quad.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
       // Scale all quad points from layout space to world space
       const pts = quad.map((p) => ({
@@ -3309,12 +3310,26 @@ export default class LifeSimScene extends Phaser.Scene {
       const centerX = (minX + maxX) / 2;
       const centerY = (minY + maxY) / 2;
 
+      console.log('[TV] Using quad path — center:', centerX, centerY, 'size:', screenW, screenH);
       try {
         const video = this.add.video(centerX, centerY, 'tv-movie');
-        video.setDisplaySize(screenW, screenH);
         video.setDepth(centerY + 1);
         video.setVolume(this.musicVolume * 0.4);
+
+        // Set size before and after play — Phaser can reset display size
+        // when the video metadata loads
+        video.setDisplaySize(screenW, screenH);
         video.play(true);
+        video.setDisplaySize(screenW, screenH);
+
+        // Also re-apply size once the video texture is ready
+        video.on('play', () => {
+          video.setDisplaySize(screenW, screenH);
+        });
+        video.on('textureready', () => {
+          video.setDisplaySize(screenW, screenH);
+        });
+
         this.tvVideo = video;
         this.tvVideoPlaying = true;
       } catch {
