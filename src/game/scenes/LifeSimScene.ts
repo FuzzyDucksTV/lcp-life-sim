@@ -3185,7 +3185,6 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private startSleepSoundTracking(time: number): void {
-    this.manSleepStartMs = time;
     this.alarmClockScheduled = false;
     this.nextSnoreAtMs = time + Phaser.Math.Between(5_000, 15_000);
   }
