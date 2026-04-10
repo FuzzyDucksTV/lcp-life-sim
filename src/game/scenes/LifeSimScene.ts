@@ -3309,48 +3309,44 @@ export default class LifeSimScene extends Phaser.Scene {
       const tr = rightPair[0];
       const br = rightPair[1];
 
-      // Center of the quad
-      const centerX = (tl.x + tr.x + bl.x + br.x) / 4;
-      const centerY = (tl.y + tr.y + bl.y + br.y) / 4;
+      // Bounding box
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const bboxW = Math.ceil(maxX - minX);
+      const bboxH = Math.ceil(maxY - minY);
 
       const tvDepth = this.findTvSpriteDepth();
 
       try {
-        // Create a hidden video for playback + audio
+        // Hidden video for playback + audio
         const video = this.add.video(0, 0, 'tv-movie');
         video.setVisible(false);
         video.setVolume(this.musicVolume * 0.4);
         video.play(true);
         this.tvVideo = video;
 
-        // Create a canvas texture to copy video frames into
-        const texW = 256;
-        const texH = 256;
-        const canvasTex = this.textures.createCanvas('tv-canvas', texW, texH);
+        // Canvas texture sized to the bounding box of the quad
+        const canvasTex = this.textures.createCanvas('tv-canvas', bboxW, bboxH);
         this.tvCanvasTexture = canvasTex;
 
-        // Build a mesh with 2 triangles forming the quad
-        // Vertices are relative to the mesh position (centerX, centerY)
-        const mesh = this.add.mesh(centerX, centerY, 'tv-canvas');
-        mesh.setDepth(tvDepth + 1);
+        // Store quad corners relative to the bounding box origin for the canvas draw
+        (this as unknown as { _tvQuadLocal: { tl: { x: number; y: number }; tr: { x: number; y: number }; bl: { x: number; y: number }; br: { x: number; y: number } } })._tvQuadLocal = {
+          tl: { x: tl.x - minX, y: tl.y - minY },
+          tr: { x: tr.x - minX, y: tr.y - minY },
+          bl: { x: bl.x - minX, y: bl.y - minY },
+          br: { x: br.x - minX, y: br.y - minY },
+        };
 
-        // Add vertices: positions relative to center, UV coords 0-1
-        const vTL = { x: tl.x - centerX, y: tl.y - centerY, u: 0, v: 0 };
-        const vTR = { x: tr.x - centerX, y: tr.y - centerY, u: 1, v: 0 };
-        const vBL = { x: bl.x - centerX, y: bl.y - centerY, u: 0, v: 1 };
-        const vBR = { x: br.x - centerX, y: br.y - centerY, u: 1, v: 1 };
+        // Display as a regular image, positioned at bbox top-left (origin 0,0)
+        const img = this.add.image(minX, minY, 'tv-canvas');
+        img.setOrigin(0, 0);
+        img.setDepth(tvDepth + 1);
+        this.tvMesh = img as unknown as Phaser.GameObjects.Mesh;
 
-        // Two triangles: TL-TR-BL and TR-BR-BL
-        mesh.addVertices(
-          [vTL.x, vTL.y, vTR.x, vTR.y, vBL.x, vBL.y, vTR.x, vTR.y, vBR.x, vBR.y, vBL.x, vBL.y],
-          [vTL.u, vTL.v, vTR.u, vTR.v, vBL.u, vBL.v, vTR.u, vTR.v, vBR.u, vBR.v, vBL.u, vBL.v],
-        );
-
-        // Phaser Mesh uses OrthoCamera by default in 2D — set it up
-        mesh.panZ(1);
-        mesh.setPerspective(1, 1);
-
-        this.tvMesh = mesh;
         this.tvVideoPlaying = true;
       } catch {
         // Video playback not supported or file missing
@@ -3406,8 +3402,35 @@ export default class LifeSimScene extends Phaser.Scene {
     if (!this.tvMesh || !this.tvVideo || !this.tvCanvasTexture) return;
     const htmlVideo = this.tvVideo.video;
     if (!htmlVideo || htmlVideo.readyState < 2) return;
+
+    const quadLocal = (this as unknown as { _tvQuadLocal?: { tl: { x: number; y: number }; tr: { x: number; y: number }; bl: { x: number; y: number }; br: { x: number; y: number } } })._tvQuadLocal;
+    if (!quadLocal) return;
+
+    const { tl, tr, bl } = quadLocal;
     const ctx = this.tvCanvasTexture.context;
-    ctx.drawImage(htmlVideo, 0, 0, this.tvCanvasTexture.width, this.tvCanvasTexture.height);
+    const w = this.tvCanvasTexture.width;
+    const h = this.tvCanvasTexture.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Affine transform maps unit square to parallelogram defined by TL, TR, BL:
+    // (0,0)->TL, (1,0)->TR, (0,1)->BL
+    // setTransform(a, b, c, d, e, f) where:
+    //   a = dx per source-x, b = dy per source-x
+    //   c = dx per source-y, d = dy per source-y
+    //   e = translate-x, f = translate-y
+    const srcW = htmlVideo.videoWidth || 1;
+    const srcH = htmlVideo.videoHeight || 1;
+
+    const ax = (tr.x - tl.x) / srcW;
+    const ay = (tr.y - tl.y) / srcW;
+    const bx = (bl.x - tl.x) / srcH;
+    const by = (bl.y - tl.y) / srcH;
+
+    ctx.setTransform(ax, ay, bx, by, tl.x, tl.y);
+    ctx.drawImage(htmlVideo, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
     this.tvCanvasTexture.refresh();
   }
 
