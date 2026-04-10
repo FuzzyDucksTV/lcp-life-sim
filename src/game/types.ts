@@ -83,6 +83,7 @@ export type TaskType =
   | 'collect_washing'
   | 'use_tv'
   | 'turn_off_tv'
+  | 'change_shirt'
   | 'door_delivery';
 
 export interface NpcTask {
