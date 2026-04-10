@@ -768,6 +768,7 @@ export default class LifeSimScene extends Phaser.Scene {
     this.emitAudioCue('bell');
     this.playSfx('sfx-doorbell', false, 0.6);
     this.time.delayedCall(2_000, () => { this.playSfx('sfx-dogbark', false, 0.5); });
+    this.interruptDogForDoorbell();
     const reactionPlayed = this.triggerManReaction('nod', MAN_REACTION_BELL_MS);
     const enqueueDoorTask = (): void => {
       this.requestPriorityTask(
@@ -2582,6 +2583,26 @@ export default class LifeSimScene extends Phaser.Scene {
     if (texture === 'dog-walk-down') {
       this.pauseCurrentAnimation(this.dog.sprite);
     }
+  }
+
+  private interruptDogForDoorbell(): void {
+    const savedTask = { ...this.dog.currentTask };
+    const remainingMs = this.dog.performUntilMs > 0 ? Math.max(0, this.dog.performUntilMs - this.time.now) : 0;
+
+    // Stop current activity and play idle
+    this.dog.currentTask = { type: 'idle' };
+    this.dog.performUntilMs = 0;
+    this.dog.path = [];
+    this.dog.pendingTargetCell = null;
+    this.playDogIdle();
+
+    // After 3 seconds, restore previous activity
+    this.time.delayedCall(3_000, () => {
+      if (this.dog.currentTask.type === 'idle' && this.dog.performUntilMs === 0) {
+        this.dog.currentTask = savedTask;
+        this.dog.performUntilMs = remainingMs > 0 ? this.time.now + remainingMs : 0;
+      }
+    });
   }
 
   private playDogSleep(): void {
