@@ -25,7 +25,6 @@ appRoot.innerHTML = `
       <section class="control-card">
         <h2>Door</h2>
         <button id="ring-bell" type="button" disabled>Ring Bell</button>
-        <button id="audio-toggle" type="button">Audio: ON</button>
         <p class="muted">Door flow is fixed: 3 seconds outside.</p>
       </section>
 
@@ -48,12 +47,25 @@ appRoot.innerHTML = `
       </section>
 
       <section class="control-card">
+        <h2>Audio</h2>
+        <button id="audio-toggle" type="button">Audio: ON</button>
+        <div class="volume-control">
+          <label for="music-volume">Music</label>
+          <input id="music-volume" type="range" min="0" max="100" value="50" />
+        </div>
+        <div class="volume-control">
+          <label for="sfx-volume">Sound Effects</label>
+          <input id="sfx-volume" type="range" min="0" max="100" value="50" />
+        </div>
+      </section>
+
+      <section class="control-card">
         <h2>Resident</h2>
         <div id="man-profile" class="profile-box"></div>
       </section>
 
       <section class="control-card">
-        <h2>Event Log</h2>
+        <h2>What's Happening</h2>
         <div id="command-log" class="log-box"></div>
       </section>
     </aside>
@@ -65,8 +77,10 @@ const sendButton = document.querySelector<HTMLButtonElement>('#send-command');
 const audioButton = document.querySelector<HTMLButtonElement>('#audio-toggle');
 const commandInput = document.querySelector<HTMLInputElement>('#command-input');
 const statusLabel = document.querySelector<HTMLParagraphElement>('#sim-status');
+const musicSlider = document.querySelector<HTMLInputElement>('#music-volume');
+const sfxSlider = document.querySelector<HTMLInputElement>('#sfx-volume');
 
-if (!ringBellButton || !sendButton || !audioButton || !commandInput || !statusLabel) {
+if (!ringBellButton || !sendButton || !audioButton || !commandInput || !statusLabel || !musicSlider || !sfxSlider) {
   throw new Error('UI shell is missing required control elements.');
 }
 
@@ -105,6 +119,22 @@ audioButton.addEventListener('click', () => {
   audioButton.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
 });
 
+// Volume sliders — apply to Phaser sound manager when scene is ready
+const applyVolumes = (): void => {
+  const runtimeScene = game.scene.getScene('LifeSimScene') as LifeSimScene | undefined;
+  if (!runtimeScene) return;
+
+  const musicVol = Number(musicSlider.value) / 100;
+  const sfxVol = Number(sfxSlider.value) / 100;
+
+  // Store volumes on scene for use in tickSoundEffects / tickBackgroundMusic
+  (runtimeScene as unknown as { musicVolume: number; sfxVolume: number }).musicVolume = musicVol;
+  (runtimeScene as unknown as { musicVolume: number; sfxVolume: number }).sfxVolume = sfxVol;
+};
+
+musicSlider.addEventListener('input', applyVolumes);
+sfxSlider.addEventListener('input', applyVolumes);
+
 const markSceneReady = (): void => {
   if (sceneReady) {
     return;
@@ -113,6 +143,7 @@ const markSceneReady = (): void => {
   setControlsEnabled(true);
   commandInput.focus();
   statusLabel.textContent = 'Simulation running (hidden AI mode).';
+  applyVolumes();
 };
 
 const game = new Phaser.Game({
