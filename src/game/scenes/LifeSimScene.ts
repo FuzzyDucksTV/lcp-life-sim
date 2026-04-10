@@ -363,6 +363,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private sfxShower: Phaser.Sound.BaseSound | null = null;
   private sfxSleeping: Phaser.Sound.BaseSound | null = null;
   private sfxGameSound: Phaser.Sound.BaseSound | null = null;
+  private sfxInteraction: Phaser.Sound.BaseSound | null = null;
   private manWalkDirection: 'left' | 'right' | 'up' | 'down' | null = null;
   private alarmClockScheduled = false;
   private nextSnoreAtMs = 0;
@@ -3154,6 +3155,19 @@ export default class LifeSimScene extends Phaser.Scene {
       }
     }
 
+    // Looping interaction sounds: fridge, dishwasher, kitchen worktop — stop when task ends
+    const loopingInteractionTask = task === 'use_fridge' || task === 'use_dishwasher' || task === 'use_kitchen_worktop';
+    if (loopingInteractionTask && isPerforming) {
+      if (!this.sfxInteraction || !(this.sfxInteraction as Phaser.Sound.WebAudioSound).isPlaying) {
+        const sfxKey = task === 'use_fridge' ? 'sfx-fridge'
+          : task === 'use_dishwasher' ? 'sfx-dishwasher'
+          : 'sfx-foodchopping';
+        this.sfxInteraction = this.playSfx(sfxKey, true, 0.5);
+      }
+    } else {
+      this.sfxInteraction = this.stopSfx(this.sfxInteraction);
+    }
+
     // One-shot sound triggers when starting a new task performance
     if (isPerforming && this.lastSfxTaskType !== task) {
       switch (task) {
@@ -3162,15 +3176,6 @@ export default class LifeSimScene extends Phaser.Scene {
           break;
         case 'open_kitchen_cupboard':
           this.playSfx('sfx-cupboard', false, 0.5);
-          break;
-        case 'use_dishwasher':
-          this.playSfx('sfx-dishwasher', false, 0.5);
-          break;
-        case 'use_kitchen_worktop':
-          this.playSfx('sfx-foodchopping', false, 0.5);
-          break;
-        case 'use_fridge':
-          this.playSfx('sfx-fridge', false, 0.5);
           break;
         case 'use_wardrobe':
           this.playSfx('sfx-wardrobe', false, 0.5);
