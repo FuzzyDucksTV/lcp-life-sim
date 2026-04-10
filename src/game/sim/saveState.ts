@@ -1,7 +1,7 @@
 import { createRandomIdentity } from './identity';
 import type { ManIdentity, SaveSnapshot } from '../types';
 
-const SAVE_KEY = 'lcp_phase6_state_v1';
+const SAVE_KEY = 'lcp_phase7_state_v1';
 
 function isBrowserStorageAvailable(): boolean {
   try {
