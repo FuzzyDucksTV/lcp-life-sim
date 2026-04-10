@@ -71,6 +71,26 @@ const INITIAL_FOOD_SUPPLY = 4;
 const INITIAL_DOG_FOOD_SUPPLY = 3;
 const IRRITATION_AUTO_RELIEF_THRESHOLD = 0.4;
 
+const SHIRT_COLORS = ['white', 'red', 'yellow', 'blue', 'green', 'purple', 'orange'] as const;
+type ShirtColor = (typeof SHIRT_COLORS)[number];
+
+// Maps texture key → filename inside /sprites/{color}/ folders
+const COLORABLE_TEXTURES: Record<string, string> = {
+  'man-walk-down': 'man-walking-down.png',
+  'man-walk-up': 'man-walking-up.png',
+  'man-walk-left': 'man-walking-left.png',
+  'man-walk-right': 'man-walking-right.png',
+  'man-sleep': 'man-sleeping.png',
+  'man-use-object': 'man-using-object.png',
+  'man-idle-stand': 'man-idle-stand.png',
+  'man-dance': 'dancing-36frames.png',
+  'man-eating-food': 'man-eatingfood.png',
+  'man-on-toilet': 'man-ontoilet.png',
+  'man-sitting-settee': 'man-sitting-settee.png',
+  'man-sit-chair': 'man-sit-chair.png',
+  'man-use-computer': 'man-use-computer.png',
+};
+
 const INTERACTIVE_OBJECT_TYPES: ReadonlyMap<string, { task: TaskType; hideOnStart: boolean }> = new Map([
   ['cooker_3x4_cooking', { task: 'use_cooker', hideOnStart: false }],
   ['cupboard_2x1_open', { task: 'open_kitchen_cupboard', hideOnStart: false }],
@@ -303,6 +323,8 @@ function textForTask(task: TaskType): string {
       return 'watch TV';
     case 'turn_off_tv':
       return 'turn off the TV';
+    case 'change_shirt':
+      return 'change shirt';
     case 'door_delivery':
       return 'check the door';
     default:
@@ -380,6 +402,7 @@ export default class LifeSimScene extends Phaser.Scene {
   private tvCanvasTexture: Phaser.Textures.CanvasTexture | null = null;
   private tvVideoResumeTime = 285;
   private tvForgottenOffAtMs = 0;
+  private currentShirtColor: ShirtColor = 'white';
   private lastBgMusicIndex = -1;
   private nextBgMusicAtMs = 0;
   private bgMusicFadingOut = false;
@@ -557,6 +580,12 @@ export default class LifeSimScene extends Phaser.Scene {
         return;
       }
 
+      // Color variant textures are optional
+      if (file.key.includes('__')) {
+        this.missingOptionalTextures.add(file.key);
+        return;
+      }
+
       if (file.key.startsWith(LAYOUT_OBJECT_TEXTURE_PREFIX)) {
         this.missingLayoutTextureKeys.add(file.key);
       }
@@ -587,6 +616,14 @@ export default class LifeSimScene extends Phaser.Scene {
     // Legacy fallback clips retained for compatibility.
     this.load.image('man-sit-chair', '/sprites/man-sit-chair.png');
     this.load.image('man-use-computer', '/sprites/man-use-computer.png');
+
+    // Load shirt color variants
+    for (const color of SHIRT_COLORS) {
+      if (color === 'white') continue;
+      for (const [textureKey, fileName] of Object.entries(COLORABLE_TEXTURES)) {
+        this.load.image(`${textureKey}__${color}`, `/sprites/${color}/${fileName}`);
+      }
+    }
 
     this.load.image('dog-walk-down', '/sprites/dog-walking-down.png');
     this.load.image('dog-walk-up', '/sprites/dog-walking-up.png');
@@ -674,14 +711,17 @@ export default class LifeSimScene extends Phaser.Scene {
     const manSpawn = runtimeContract.npcs.find((npc) => npc.id === 'man')?.spawn || { x: 1280, y: 1030 };
     const dogSpawn = runtimeContract.npcs.find((npc) => npc.id === 'dog')?.spawn || { x: 860, y: 1037 };
 
+    // Pick a random shirt color at game start
+    const nonWhiteColors = SHIRT_COLORS.filter((c) => c !== 'white');
+    this.currentShirtColor = nonWhiteColors[Math.floor(Math.random() * nonWhiteColors.length)];
     this.prepareAllAnimations();
 
-    const manScale = this.getSuggestedScale('man-walk-down', MAN_DESIRED_HEIGHT_PX);
+    const manScale = this.getSuggestedScale(this.resolveTexture('man-walk-down'), MAN_DESIRED_HEIGHT_PX);
     const dogScale = this.getSuggestedScale('dog-walk-down', DOG_DESIRED_HEIGHT_PX);
 
     this.man = {
       id: 'man',
-      sprite: this.add.sprite(manSpawn.x, this.toRenderY(manSpawn.y, 'man'), 'man-walk-down', 0).setScale(manScale),
+      sprite: this.add.sprite(manSpawn.x, this.toRenderY(manSpawn.y, 'man'), this.resolveTexture('man-walk-down'), 0).setScale(manScale),
       path: [],
       currentTask: { type: 'idle', source: 'system', priority: 0, resumable: false },
       performUntilMs: 0,
@@ -880,13 +920,59 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   private resolveTexture(primary: string, fallback?: string): string {
+    // Try colored variant first
+    if (this.currentShirtColor !== 'white' && primary in COLORABLE_TEXTURES) {
+      const coloredKey = `${primary}__${this.currentShirtColor}`;
+      if (this.textures.exists(coloredKey)) {
+        return coloredKey;
+      }
+    }
     if (this.textures.exists(primary)) {
       return primary;
+    }
+    // Try colored fallback
+    if (fallback && this.currentShirtColor !== 'white' && fallback in COLORABLE_TEXTURES) {
+      const coloredFallback = `${fallback}__${this.currentShirtColor}`;
+      if (this.textures.exists(coloredFallback)) {
+        return coloredFallback;
+      }
     }
     if (fallback && this.textures.exists(fallback)) {
       return fallback;
     }
     return primary;
+  }
+
+  public setShirtColor(color: ShirtColor): void {
+    if (color === this.currentShirtColor) return;
+    this.currentShirtColor = color;
+
+    // Prepare sprite sheets for the new color textures
+    for (const textureKey of Object.keys(COLORABLE_TEXTURES)) {
+      const coloredKey = color === 'white' ? textureKey : `${textureKey}__${color}`;
+      if (!this.textures.exists(coloredKey)) continue;
+      // Find matching animation spec to get frameCount/framesPerRow
+      const spec = this.animationSpecs.find(
+        (s) => s.texture === textureKey || s.fallbackTexture === textureKey
+      );
+      if (spec) {
+        this.prepareSpriteSheet(coloredKey, spec.frameCount, spec.framesPerRow);
+      }
+    }
+
+    // Rebuild all animations so they reference the new colored textures
+    this.prepareAllAnimations();
+
+    // If the man is currently playing an animation, restart it with the new texture
+    const currentAnim = this.man.sprite.anims.currentAnim;
+    if (currentAnim) {
+      const spec = this.animationSpecs.find((s) => s.animationKey === currentAnim.key);
+      if (spec) {
+        const texture = this.resolveTexture(spec.texture, spec.fallbackTexture);
+        this.applyNpcScaleForTexture(this.man, texture);
+        this.man.sprite.play(currentAnim.key, true);
+      }
+    }
   }
 
   private prepareSpriteSheet(textureKey: string, frameCount: number, framesPerRow?: number): void {
@@ -1283,6 +1369,25 @@ export default class LifeSimScene extends Phaser.Scene {
       this.identity.mood = onCommandRejected(this.identity.mood);
       this.emitAudioCue('negative');
       this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
+      this.emitProfile();
+      return;
+    }
+
+    // Handle shirt color change immediately (no task needed)
+    if (request.intent === 'change_shirt') {
+      const requestedColor = SHIRT_COLORS.find((c) => c !== 'white' && request.normalized.includes(c));
+      if (requestedColor) {
+        this.setShirtColor(requestedColor);
+        this.triggerManReaction('nod', MAN_REACTION_ACK_MS);
+        this.emitLog('man', `${this.identity.name} changed into a ${requestedColor} top.`);
+      } else {
+        const availableColors = SHIRT_COLORS.filter((c) => c !== 'white').join(', ');
+        this.emitLog('man', `${this.identity.name} doesn't have that colour. Available: ${availableColors}.`);
+        this.triggerManReaction('shake', MAN_REACTION_REJECT_MS);
+      }
+      this.recordCommandOutcome(true);
+      this.identity.mood = onCommandAccepted(this.identity.mood);
+      this.emitAudioCue('positive');
       this.emitProfile();
       return;
     }
@@ -2142,6 +2247,11 @@ export default class LifeSimScene extends Phaser.Scene {
 
     if (task.type === 'use_wardrobe') {
       this.hideInteractiveObjectsForTask('use_wardrobe');
+      // Change shirt color when using the wardrobe
+      const available = SHIRT_COLORS.filter((c) => c !== this.currentShirtColor);
+      const newColor = available[Math.floor(Math.random() * available.length)];
+      this.setShirtColor(newColor);
+      this.emitLog('man', `${this.identity.name} changed into a ${newColor} top.`);
     }
 
     // Post-delivery chain: door → cupboard or fridge
