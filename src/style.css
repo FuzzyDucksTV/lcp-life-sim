@@ -171,8 +171,59 @@ button:disabled {
 }
 
 #audio-toggle {
-  margin-top: 8px;
+  margin-bottom: 10px;
   width: 100%;
+}
+
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.volume-control label {
+  min-width: 90px;
+  margin-bottom: 0;
+  font-size: 0.82rem;
+}
+
+.volume-control input[type="range"] {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(128, 153, 187, 0.25);
+  border-radius: 3px;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.volume-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+}
+
+.volume-control input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+}
+
+.backstory {
+  line-height: 1.5;
+  font-size: 0.84rem !important;
+  color: var(--text) !important;
 }
 
 input {
