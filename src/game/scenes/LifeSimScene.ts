@@ -559,6 +559,7 @@ export default class LifeSimScene extends Phaser.Scene {
   }
 
   preload(): void {
+    this.load.setBaseURL(import.meta.env.BASE_URL.replace(/\/$/, ''));
     this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
       const optionalAnimationKeys = new Set([
         'man-idle-stand',
