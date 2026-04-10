@@ -1704,7 +1704,7 @@ export default class LifeSimScene extends Phaser.Scene {
       if (bedAnchor) {
         npc.sprite.setPosition(bedAnchor.x, this.toRenderY(bedAnchor.y, npc.id));
         if (bedAnchor.foreground && npc.performUntilMs > 0) {
-          npc.sprite.depth = this.toLogicalY(npc.sprite.y, npc.id) + MAN_INTERACTION_DEPTH_BOOST;
+          npc.sprite.depth = this.toLogicalY(npc.sprite.y, npc.id) + 200;
         }
       }
       if (time >= npc.performUntilMs) {
@@ -3055,15 +3055,18 @@ export default class LifeSimScene extends Phaser.Scene {
 
   private getDogDepth(): number {
     const baseDepth = this.toLogicalY(this.dog.sprite.y, 'dog');
+    let isForeground = false;
     if (this.dog.performUntilMs > 0 && this.dog.path.length === 0) {
       const anchorKey: ActionAnchorKey | null =
         this.dog.currentTask.type === 'sleep' ? 'dog_sleeping' : 'dog_eating';
       const anchor = this.actionAnchors[anchorKey];
       if (anchor && anchor.foreground) {
-        return baseDepth + MAN_INTERACTION_DEPTH_BOOST;
+        isForeground = true;
       }
     }
-    return baseDepth;
+    // Small boost to render in front of the object, but not so large it overrides
+    // normal Y-based ordering with the other NPC
+    return isForeground ? baseDepth + 200 : baseDepth;
   }
 
   private getManDepth(): number {
@@ -3072,7 +3075,9 @@ export default class LifeSimScene extends Phaser.Scene {
       this.man.performUntilMs > 0 &&
       this.man.path.length === 0 &&
       this.isForegroundInteractionTask(this.man.currentTask.type);
-    return isForegroundInteraction ? baseDepth + MAN_INTERACTION_DEPTH_BOOST : baseDepth;
+    // Small boost to render in front of the object, but not so large it overrides
+    // normal Y-based ordering with the other NPC
+    return isForegroundInteraction ? baseDepth + 200 : baseDepth;
   }
 
   private getDogCompanionCellNearMan(): CellKey | null {
