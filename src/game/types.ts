@@ -14,6 +14,24 @@ export interface Personality {
   sociability: number;
 }
 
+export interface LifestyleTraits {
+  lovesGaming: number;      // 0-1 how much he likes computer games
+  lovesPiano: number;       // 0-1 how much he enjoys piano
+  lovesTV: number;          // 0-1 how much he watches TV
+  lovesReading: number;     // 0-1 bookcase usage
+  lovesExercise: number;    // 0-1 running machine frequency
+  lovesFood: number;        // 0-1 how much he loves cooking/eating
+  hygiene: number;          // 0-1 shower frequency
+  sedentary: number;        // 0-1 sitting in chair frequency
+}
+
+export interface DogPersonality {
+  name: string;
+  lovesFood: number;        // 0-1 eats more often
+  lovesSleep: number;       // 0-1 sleeps more often
+  energy: number;           // 0-1 how active/wandery
+}
+
 export interface MoodState {
   energy: number;
   irritation: number;
@@ -25,6 +43,9 @@ export interface ManIdentity {
   name: string;
   appearanceSeed: number;
   personality: Personality;
+  lifestyle: LifestyleTraits;
+  dog: DogPersonality;
+  backstory: string;
   mood: MoodState;
   createdAt: string;
 }
